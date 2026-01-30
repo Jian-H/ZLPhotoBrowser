@@ -136,6 +136,23 @@ public class ZLDrawPath: NSObject {
         
         path.stroke()
     }
+
+    /// 命中检测（用于橡皮擦等“擦到线条就算命中”的场景）。
+    /// - Parameters:
+    ///   - point: 与 `path` 同一坐标系下的点
+    ///   - extraLineWidth: 额外增加的命中宽度（同坐标系下）
+    func hitTestStrokeContains(_ point: CGPoint, extraLineWidth: CGFloat) -> Bool {
+        let width = max(0, path.lineWidth + extraLineWidth)
+        guard width > 0 else { return false }
+        let stroked = path.cgPath.copy(
+            strokingWithWidth: width,
+            lineCap: .round,
+            lineJoin: .round,
+            miterLimit: 0,
+            transform: .identity
+        )
+        return stroked.contains(point)
+    }
 }
 
 public extension ZLDrawPath {

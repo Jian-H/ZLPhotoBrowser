@@ -1331,9 +1331,15 @@ open class ZLEditImageViewController: UIViewController {
         if pan.state == .began || pan.state == .changed {
             eraserCircleView.center = pan.location(in: containerView)
             
+            // 命中宽度：随缩放自适应，并额外给一点容差，避免“很难擦中”
+            // 注意：这里的 drawPoint/paths 坐标系已经是“drawPath 坐标系”，所以需要把屏幕上的宽度换算进来。
+            let eraserWidthInView = max(drawLineWidth, 24) / mainScrollView.zoomScale
+            let extraHitWidthInPath = eraserWidthInView / pointScale
+
             var needDraw = false
             for path in drawPaths {
-                if path.path.contains(drawPoint), !deleteDrawPaths.contains(path) {
+                if path.hitTestStrokeContains(drawPoint, extraLineWidth: extraHitWidthInPath),
+                   !deleteDrawPaths.contains(path) {
                     path.willDelete = true
                     deleteDrawPaths.append(path)
                     needDraw = true
