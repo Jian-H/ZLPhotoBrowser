@@ -91,6 +91,8 @@
 		FDE1DB76289A4B120003CA4D /* NSError+ZLPhotoBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE1DB75289A4B120003CA4D /* NSError+ZLPhotoBrowser.swift */; };
 		FDE374252AC1AE3700BA7DA0 /* ZLPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE374242AC1AE3700BA7DA0 /* ZLPaths.swift */; };
 		FDF7790B2AC1700F00001015 /* ZLEditorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDF7790A2AC1700F00001015 /* ZLEditorManager.swift */; };
+		FDE100012F00000100000003 /* ZLDrawCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE100012F00000100000004 /* ZLDrawCanvasView.swift */; };
+		FDE100012F00000100000005 /* ZLDrawTouchCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE100012F00000100000006 /* ZLDrawTouchCollector.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -181,6 +183,8 @@
 		FDE1DB75289A4B120003CA4D /* NSError+ZLPhotoBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSError+ZLPhotoBrowser.swift"; sourceTree = "<group>"; };
 		FDE374242AC1AE3700BA7DA0 /* ZLPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZLPaths.swift; sourceTree = "<group>"; };
 		FDF7790A2AC1700F00001015 /* ZLEditorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZLEditorManager.swift; sourceTree = "<group>"; };
+		FDE100012F00000100000004 /* ZLDrawCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZLDrawCanvasView.swift; sourceTree = "<group>"; };
+		FDE100012F00000100000006 /* ZLDrawTouchCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZLDrawTouchCollector.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -348,6 +352,8 @@
 				E410177825305C73004C4952 /* ZLFilter.swift */,
 				FDE374242AC1AE3700BA7DA0 /* ZLPaths.swift */,
 				FDF7790A2AC1700F00001015 /* ZLEditorManager.swift */,
+				FDE100012F00000100000004 /* ZLDrawCanvasView.swift */,
+				FDE100012F00000100000006 /* ZLDrawTouchCollector.swift */,
 			);
 			path = Edit;
 			sourceTree = "<group>";
@@ -462,6 +468,8 @@
 				2CC461BF2551214700BF96E8 /* ZLAddPhotoCell.swift in Sources */,
 				FDC6B5FD273B6E1C00973E43 /* ZLCameraConfiguration.swift in Sources */,
 				FDF7790B2AC1700F00001015 /* ZLEditorManager.swift in Sources */,
+				FDE100012F00000100000003 /* ZLDrawCanvasView.swift in Sources */,
+				FDE100012F00000100000005 /* ZLDrawTouchCollector.swift in Sources */,
 				E4D046F22500A361000BAEC2 /* ZLPhotoPreviewPopInteractiveTransition.swift in Sources */,
 				FD047629276C7C1C00A93FA3 /* ZLAdjustSlider.swift in Sources */,
 				E462466224EBF06F00EF6C57 /* String+ZLPhotoBrowser.swift in Sources */,

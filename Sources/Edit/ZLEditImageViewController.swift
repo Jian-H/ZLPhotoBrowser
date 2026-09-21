@@ -128,12 +128,7 @@ open class ZLEditImageViewController: UIViewController {
     }()
     
     // Show draw lines.
-    private lazy var drawingImageView: UIImageView = {
-        let view = UIImageView()
-        view.contentMode = .scaleAspectFit
-        view.isUserInteractionEnabled = true
-        return view
-    }()
+    private lazy var drawingImageView = ZLDrawCanvasView()
     
     // Show text and image stickers.
     private lazy var stickersContainer = UIView()
@@ -247,6 +242,19 @@ open class ZLEditImageViewController: UIViewController {
     
     private var defaultDrawPathWidth: CGFloat = 0
     
+    private var processedDrawSampleCount = 0
+
+    private lazy var drawTouchCollector = ZLDrawTouchCollector()
+    private var rawDrawSamples: [CGPoint] = []
+    private var predictedDrawSamples: [CGPoint] = []
+    private var isCollectingRawDrawTouch = false
+    private var panHandledDrawTouch = false
+    private var suppressNextTapAction = false
+    private var activeDrawPath: ZLDrawPath?
+    private var pendingDrawFinishPoint: CGPoint?
+
+    /// Captured before UIPanGestureRecognizer crosses its recognition threshold.
+    private var initialDrawTouchPoint: CGPoint?
     private var impactFeedback: UIImpactFeedbackGenerator?
     
     // 第一次进入界面时，布局后frame，裁剪dimiss动画使用
@@ -579,6 +587,7 @@ open class ZLEditImageViewController: UIViewController {
         
         let width = drawLineWidth / mainScrollView.zoomScale * toImageScale
         defaultDrawPathWidth = width
+        drawLine()
     }
     
     override open func viewDidLayoutSubviews() {
@@ -686,9 +695,7 @@ open class ZLEditImageViewController: UIViewController {
             }
         }
         
-        if !drawPaths.isEmpty {
-            drawLine()
-        }
+        drawLine()
         if !mosaicPaths.isEmpty {
             generateNewMosaicImage()
         }
@@ -960,6 +967,19 @@ open class ZLEditImageViewController: UIViewController {
         view.addGestureRecognizer(tapGes)
         
         view.addGestureRecognizer(panGes)
+        drawTouchCollector.shouldCollect = { [weak self] touch in
+            self?.shouldCollectDrawTouch(touch) ?? false
+        }
+        drawTouchCollector.began = { [weak self] actual, predicted in
+            self?.beginRawDrawSamples(actual: actual, predicted: predicted)
+        }
+        drawTouchCollector.moved = { [weak self] actual, predicted in
+            self?.appendRawDrawSamples(actual: actual, predicted: predicted)
+        }
+        drawTouchCollector.ended = { [weak self] actual, predicted in
+            self?.finishRawDrawSamples(actual: actual, predicted: predicted)
+        }
+        view.addGestureRecognizer(drawTouchCollector)
         mainScrollView.panGestureRecognizer.require(toFail: panGes)
         
         stickers.forEach { self.addSticker($0) }
@@ -1239,6 +1259,10 @@ open class ZLEditImageViewController: UIViewController {
     }
     
     @objc private func tapAction(_ tap: UITapGestureRecognizer) {
+        if suppressNextTapAction {
+            suppressNextTapAction = false
+            return
+        }
         if bottomShadowView.alpha == 1 {
             setToolView(show: false)
         } else {
@@ -1255,47 +1279,32 @@ open class ZLEditImageViewController: UIViewController {
         
         if selectedTool == .draw {
             let point = pan.location(in: drawingImageView)
+            let bufferedPoints = rawDrawSamples.isEmpty ? [point] : rawDrawSamples
             if pan.state == .began {
                 setToolView(show: false)
-                
-                let originalRatio = min(mainScrollView.frame.width / originalImage.size.width, mainScrollView.frame.height / originalImage.size.height)
-                let ratio = min(
-                    mainScrollView.frame.width / currentClipStatus.editRect.width,
-                    mainScrollView.frame.height / currentClipStatus.editRect.height
-                )
-                let scale = ratio / originalRatio
-                // 缩放到最初的size
-                var size = drawingImageView.frame.size
-                size.width /= scale
-                size.height /= scale
-                if shouldSwapSize {
-                    swap(&size.width, &size.height)
-                }
-                
-                var toImageScale = ZLEditImageViewController.maxDrawLineImageWidth / size.width
-                if editImage.size.width / editImage.size.height > 1 {
-                    toImageScale = ZLEditImageViewController.maxDrawLineImageWidth / size.height
-                }
-                
-                let path = ZLDrawPath(
-                    pathColor: currentDrawColor,
-                    pathWidth: drawLineWidth / mainScrollView.zoomScale,
-                    defaultLinePath: defaultDrawPathWidth,
-                    ratio: ratio / originalRatio / toImageScale,
-                    startPoint: point
-                )
+                let startPoint = initialDrawTouchPoint ?? bufferedPoints.first ?? point
+                guard let path = makeDrawPath(startPoint: startPoint) else { return }
+                panHandledDrawTouch = true
+                activeDrawPath = path
                 drawPaths.append(path)
+                path.addLines(bufferedPoints.dropFirst())
+                processedDrawSampleCount = bufferedPoints.count
+                if rawDrawSamples.isEmpty, startPoint != point {
+                    path.addLine(to: point)
+                }
+                updateActiveDrawPathPreview()
             } else if pan.state == .changed {
-                let path = drawPaths.last
-                path?.addLine(to: point)
-                drawLine()
+                if rawDrawSamples.isEmpty {
+                    activeDrawPath?.addLine(to: point)
+                }
+                updateActiveDrawPathPreview()
             } else if pan.state == .cancelled || pan.state == .ended {
                 setToolView(show: true, delay: 0.5)
-                
-                if let path = drawPaths.last {
-                    path.finishDrawing()
-                    drawLine()
-                    editorManager.storeAction(.draw(path))
+                pendingDrawFinishPoint = point
+                // Give the raw collector for this same UIEvent a chance to
+                // append terminal coalesced samples before committing.
+                DispatchQueue.main.async { [weak self] in
+                    self?.finishActiveDrawPath()
                 }
             }
         } else if selectedTool == .mosaic {
@@ -1365,6 +1374,9 @@ open class ZLEditImageViewController: UIViewController {
         let eraserRadius = eraserRadiusInView / pointScale
         
         if pan.state == .began {
+            // Cancels a pending delayed toolbar reveal from the previous
+            // stroke, matching the draw and mosaic gesture paths.
+            setToolView(show: false)
             eraserCircleView.transform = CGAffineTransform(scaleX: 1 / mainScrollView.zoomScale, y: 1 / mainScrollView.zoomScale)
             eraserCircleView.isHidden = false
             impactFeedback?.prepare()
@@ -1375,6 +1387,7 @@ open class ZLEditImageViewController: UIViewController {
             eraserCircleView.center = pan.location(in: containerView)
             
             var needDraw = false
+            var invalidatedPaths: [ZLDrawPath] = []
             for path in drawPaths {
                 if deleteDrawPaths.contains(path) { continue }
                 
@@ -1388,23 +1401,25 @@ open class ZLEditImageViewController: UIViewController {
                 if hit {
                     path.willDelete = true
                     deleteDrawPaths.append(path)
+                    invalidatedPaths.append(path)
                     needDraw = true
                     impactFeedback?.impactOccurred()
                 }
             }
             lastEraserDrawPoint = drawPoint
             if needDraw {
-                drawLine()
+                drawingImageView.invalidate(paths: invalidatedPaths, using: drawPaths)
             }
         } else {
             eraserCircleView.transform = .identity
             eraserCircleView.isHidden = true
             lastEraserDrawPoint = nil
             if !deleteDrawPaths.isEmpty {
-                editorManager.storeAction(.eraser(deleteDrawPaths))
-                drawPaths.removeAll { deleteDrawPaths.contains($0) }
+                let removedPaths = deleteDrawPaths
+                editorManager.storeAction(.eraser(removedPaths))
+                drawPaths.removeAll { removedPaths.contains($0) }
+                drawingImageView.invalidate(paths: removedPaths, using: drawPaths)
                 deleteDrawPaths.removeAll()
-                drawLine()
             }
         }
     }
@@ -1644,13 +1659,124 @@ open class ZLEditImageViewController: UIViewController {
         size.height *= toImageScale
         
         
-        drawingImageView.image = UIGraphicsImageRenderer.zl.renderImage(size: size) { context in
-            context.setAllowsAntialiasing(true)
-            context.setShouldAntialias(true)
-            for path in drawPaths {
-                path.drawPath()
-            }
+        drawingImageView.rebuild(paths: drawPaths, size: size)
+    }
+
+    private func previewPath(for path: ZLDrawPath, pan: UIPanGestureRecognizer) -> UIBezierPath {
+        path.previewPath(adding: predictedDrawSamples)
+    }
+
+    private func beginRawDrawSamples(actual: [UITouch], predicted: [UITouch]) {
+        isCollectingRawDrawTouch = true
+        panHandledDrawTouch = false
+        rawDrawSamples.removeAll(keepingCapacity: true)
+        predictedDrawSamples.removeAll(keepingCapacity: true)
+        appendRawDrawSamples(actual: actual, predicted: predicted)
+    }
+
+    private func appendRawDrawSamples(actual: [UITouch], predicted: [UITouch]) {
+        guard isCollectingRawDrawTouch,
+              selectedTool == .draw,
+              !eraserBtn.isSelected else { return }
+        for touch in actual {
+            let point = touch.location(in: drawingImageView)
+            if rawDrawSamples.last != point { rawDrawSamples.append(point) }
         }
+        predictedDrawSamples = predicted.map { $0.location(in: drawingImageView) }
+        updateActiveDrawPathPreview()
+    }
+
+    private func finishRawDrawSamples(actual: [UITouch], predicted: [UITouch]) {
+        appendRawDrawSamples(actual: actual, predicted: predicted)
+        defer {
+            isCollectingRawDrawTouch = false
+            predictedDrawSamples.removeAll(keepingCapacity: true)
+        }
+
+        // A tap or a sub-threshold movement never makes UIPanGestureRecognizer
+        // begin. Keep its true landing point as a dot, rather than silently
+        // discarding a deliberately small mark.
+        guard !panHandledDrawTouch,
+              let startPoint = rawDrawSamples.first,
+              let path = makeDrawPath(startPoint: startPoint) else { return }
+        path.finishDrawing()
+        drawPaths.append(path)
+        drawingImageView.commit(path, allPaths: drawPaths)
+        editorManager.storeAction(.draw(path))
+        suppressNextTapAction = true
+        DispatchQueue.main.async { [weak self] in
+            self?.suppressNextTapAction = false
+        }
+        rawDrawSamples.removeAll(keepingCapacity: true)
+        initialDrawTouchPoint = nil
+    }
+
+    private func updateActiveDrawPathPreview() {
+        guard let path = activeDrawPath else { return }
+        let newSamples = rawDrawSamples.dropFirst(processedDrawSampleCount)
+        if !newSamples.isEmpty {
+            path.addLines(newSamples)
+            processedDrawSampleCount = rawDrawSamples.count
+        }
+        drawingImageView.showPreview(path, previewPath: previewPath(for: path, pan: panGes))
+    }
+
+    private func finishActiveDrawPath() {
+        guard let path = activeDrawPath else { return }
+        updateActiveDrawPathPreview()
+        if rawDrawSamples.isEmpty, let point = pendingDrawFinishPoint {
+            path.addLine(to: point)
+        }
+        path.finishDrawing()
+        drawingImageView.commit(path, allPaths: drawPaths)
+        editorManager.storeAction(.draw(path))
+
+        activeDrawPath = nil
+        pendingDrawFinishPoint = nil
+        processedDrawSampleCount = 0
+        initialDrawTouchPoint = nil
+        rawDrawSamples.removeAll(keepingCapacity: true)
+        predictedDrawSamples.removeAll(keepingCapacity: true)
+    }
+
+    private func shouldCollectDrawTouch(_ touch: UITouch) -> Bool {
+        guard selectedTool == .draw,
+              !eraserBtn.isSelected,
+              imageStickerContainerIsHidden,
+              !isScrolling else { return false }
+        let point = touch.location(in: drawingImageView)
+        return drawingImageView.bounds.contains(point)
+    }
+
+    private func makeDrawPath(startPoint: CGPoint) -> ZLDrawPath? {
+        let originalRatio = min(
+            mainScrollView.frame.width / originalImage.size.width,
+            mainScrollView.frame.height / originalImage.size.height
+        )
+        let ratio = min(
+            mainScrollView.frame.width / currentClipStatus.editRect.width,
+            mainScrollView.frame.height / currentClipStatus.editRect.height
+        )
+        guard originalRatio > 0, ratio > 0 else { return nil }
+
+        let scale = ratio / originalRatio
+        var size = drawingImageView.frame.size
+        size.width /= scale
+        size.height /= scale
+        if shouldSwapSize {
+            swap(&size.width, &size.height)
+        }
+        guard size.width > 0, size.height > 0 else { return nil }
+
+        let referenceLength = editImage.size.width / editImage.size.height > 1 ? size.height : size.width
+        let imageScale = ZLEditImageViewController.maxDrawLineImageWidth / referenceLength
+        return ZLDrawPath(
+            pathColor: currentDrawColor,
+            pathWidth: drawLineWidth / mainScrollView.zoomScale,
+            defaultLinePath: defaultDrawPathWidth,
+            ratio: ratio / originalRatio / imageScale,
+            startPoint: startPoint
+        )
     }
     
     private func changeFilter(_ filter: ZLFilter) {
@@ -1776,7 +1902,7 @@ open class ZLEditImageViewController: UIViewController {
             format.scale = self.editImage.scale
         } imageActions: { context in
             editImage.draw(at: .zero)
-            drawingImageView.image?.draw(in: CGRect(origin: .zero, size: originalImage.size))
+            drawingImageView.imageSnapshot()?.draw(in: CGRect(origin: .zero, size: originalImage.size))
             
             if !stickersContainer.subviews.isEmpty {
                 let scale = imageSize.width / stickersContainer.frame.width
@@ -1808,6 +1934,15 @@ open class ZLEditImageViewController: UIViewController {
 // MARK: UIGestureRecognizerDelegate
 
 extension ZLEditImageViewController: UIGestureRecognizerDelegate {
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if gestureRecognizer === panGes,
+           selectedTool == .draw,
+           !eraserBtn.isSelected {
+            initialDrawTouchPoint = touch.location(in: drawingImageView)
+        }
+        return true
+    }
+
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard imageStickerContainerIsHidden else {
             return false
@@ -2141,24 +2276,24 @@ extension ZLEditImageViewController: ZLEditorManagerDelegate {
     
     private func undoDraw(_ path: ZLDrawPath) {
         drawPaths.removeLast()
-        drawLine()
+        drawingImageView.invalidate(paths: [path], using: drawPaths)
     }
     
     private func redoDraw(_ path: ZLDrawPath) {
         drawPaths.append(path)
-        drawLine()
+        drawingImageView.commit(path, allPaths: drawPaths)
     }
     
     private func undoEraser(_ paths: [ZLDrawPath]) {
         paths.forEach { $0.willDelete = false }
         drawPaths.append(contentsOf: paths)
         drawPaths = drawPaths.sorted { $0.index < $1.index }
-        drawLine()
+        drawingImageView.invalidate(paths: paths, using: drawPaths)
     }
     
     private func redoEraser(_ paths: [ZLDrawPath]) {
         drawPaths.removeAll { paths.contains($0) }
-        drawLine()
+        drawingImageView.invalidate(paths: paths, using: drawPaths)
     }
     
     private func undoOrRedoClip(_ status: ZLClipStatus) {
