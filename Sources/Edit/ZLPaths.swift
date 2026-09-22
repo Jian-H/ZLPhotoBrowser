@@ -41,20 +41,34 @@ public class ZLDrawPath: NSObject {
     
     private let ratio: CGFloat
     
-    /// 归一化坐标点（已除以 ratio），用于后续平滑处理
+    /// 归一化坐标点（已除以 ratio）。每一个有效触点都是路径节点，不能
+    /// 因为渲染平滑而被向后移动或删除。
     private var points: [CGPoint] = []
     
     /// 命中测试用的描边 CGPath 缓存，key 为 strokeWidth，path 变化时清空
     private var strokedPathCache: (strokeWidth: CGFloat, path: CGPath)?
     
-    // 平滑相关参数
-    private let minPointSpacing: CGFloat = 1.5
-    private let slowSmoothingFactor: CGFloat = 0.2
-    private let fastSmoothingFactor: CGFloat = 0.4
+    // Coalesced touch samples can contain the same coordinate more than once.
+    // Only coalesce numerically identical points; a distance threshold here
+    // causes short handwriting strokes to disappear.
+    private let duplicatePointTolerance: CGFloat = 0.001
     
     let index: Int
     
     var path: UIBezierPath
+
+    var strokeColor: UIColor { pathColor }
+
+    var renderBounds: CGRect {
+        let radius = max(path.lineWidth, bgPath.lineWidth) / 2
+        return path.cgPath.boundingBoxOfPath.insetBy(dx: -radius, dy: -radius)
+    }
+
+    var renderPadding: CGFloat {
+        max(path.lineWidth, bgPath.lineWidth) / 2 + 2
+    }
+
+    var sampledPointCount: Int { points.count }
     
     var willDelete = false
     
@@ -87,13 +101,33 @@ public class ZLDrawPath: NSObject {
     
     func addLine(to point: CGPoint) {
         let normalized = CGPoint(x: point.x / ratio, y: point.y / ratio)
-        appendPointIfNeeded(normalized, force: false)
-        rebuildPaths(isFinal: false)
+        appendLineIfNeeded(normalized)
+    }
+
+    func addLines(_ points: ArraySlice<CGPoint>) {
+        for point in points {
+            let normalized = CGPoint(x: point.x / ratio, y: point.y / ratio)
+            appendLineIfNeeded(normalized)
+        }
+    }
+
+    func previewPath(adding points: [CGPoint]) -> UIBezierPath {
+        guard !points.isEmpty else { return path }
+        guard let preview = path.copy() as? UIBezierPath else { return path }
+        var last = self.points[self.points.count - 1]
+        for point in points {
+            let normalized = CGPoint(x: point.x / ratio, y: point.y / ratio)
+            if Self.distance(last, normalized) > duplicatePointTolerance {
+                preview.addLine(to: normalized)
+                last = normalized
+            }
+        }
+        return preview
     }
     
-    /// 笔画结束时调用，确保最终的路径包含末端优化（去除反向短钩 / 收敛到真实终点）
+    /// 保留 API 语义。路径已随每个原始触点增量追加，收笔时无需重建。
     func finishDrawing() {
-        rebuildPaths(isFinal: true)
+        strokedPathCache = nil
     }
     
     /// 判断某个点是否命中当前笔画（用于橡皮擦）。
@@ -147,180 +181,19 @@ public class ZLDrawPath: NSObject {
         return stroked
     }
     
-    private func appendPointIfNeeded(_ point: CGPoint, force: Bool) {
+    private func appendLineIfNeeded(_ point: CGPoint) {
         guard let last = points.last else {
             points.append(point)
             return
         }
         let d = Self.distance(last, point)
-        if d < 0.1 {
-            points[points.count - 1] = point
-            return
-        }
-        if d < minPointSpacing, !force {
+        if d <= duplicatePointTolerance {
             return
         }
         points.append(point)
-    }
-    
-    private func rebuildPaths(isFinal: Bool) {
-        let sanitized = Self.sanitize(
-            points,
-            isFinal: isFinal,
-            slowSmoothingFactor: slowSmoothingFactor,
-            fastSmoothingFactor: fastSmoothingFactor
-        )
-        
-        let newPath = Self.makeBezierPath(
-            from: sanitized,
-            lineWidth: pathWidth / ratio
-        )
-        let newBgPath = Self.makeBezierPath(
-            from: sanitized,
-            lineWidth: pathWidth / ratio + defaultLinePath
-        )
-        path = newPath
-        bgPath = newBgPath
-        // path 已变化，命中测试缓存失效
+        path.addLine(to: point)
+        bgPath.addLine(to: point)
         strokedPathCache = nil
-    }
-    
-    // MARK: - 路径生成
-    
-    private static func makeBezierPath(from pts: [CGPoint], lineWidth: CGFloat) -> UIBezierPath {
-        let bezier = UIBezierPath()
-        bezier.lineWidth = lineWidth
-        bezier.lineCapStyle = .round
-        bezier.lineJoinStyle = .round
-        
-        guard let first = pts.first else { return bezier }
-        bezier.move(to: first)
-        
-        if pts.count == 1 { return bezier }
-        if pts.count == 2 {
-            bezier.addLine(to: pts[1])
-            return bezier
-        }
-        
-        // 在首尾各复制一个点，确保端点段也能用三次贝塞尔
-        let extended = [pts[0]] + pts + [pts[pts.count - 1]]
-        for i in 0..<(extended.count - 3) {
-            let p0 = extended[i]
-            let p1 = extended[i + 1]
-            let p2 = extended[i + 2]
-            let p3 = extended[i + 3]
-            
-            let cp1 = CGPoint(
-                x: p1.x + (p2.x - p0.x) / 6,
-                y: p1.y + (p2.y - p0.y) / 6
-            )
-            let cp2 = CGPoint(
-                x: p2.x - (p3.x - p1.x) / 6,
-                y: p2.y - (p3.y - p1.y) / 6
-            )
-            bezier.addCurve(to: p2, controlPoint1: cp1, controlPoint2: cp2)
-        }
-        return bezier
-    }
-    
-    // MARK: - 点集平滑
-    
-    private static func sanitize(
-        _ pts: [CGPoint],
-        isFinal: Bool,
-        slowSmoothingFactor: CGFloat,
-        fastSmoothingFactor: CGFloat
-    ) -> [CGPoint] {
-        guard pts.count > 2 else { return pts }
-        var result = smoothPoints(
-            pts,
-            isFinal: isFinal,
-            slowSmoothingFactor: slowSmoothingFactor,
-            fastSmoothingFactor: fastSmoothingFactor
-        )
-        result = dropSharpTerminalHook(result)
-        result = removeTinyJitter(result)
-        return result
-    }
-    
-    private static func smoothPoints(
-        _ pts: [CGPoint],
-        isFinal: Bool,
-        slowSmoothingFactor: CGFloat,
-        fastSmoothingFactor: CGFloat
-    ) -> [CGPoint] {
-        guard pts.count > 2 else { return pts }
-        
-        var result: [CGPoint] = [pts[0]]
-        for point in pts.dropFirst() {
-            let last = result[result.count - 1]
-            let d = distance(last, point)
-            let t = min(max(d / 12, 0), 1)
-            let factor = slowSmoothingFactor + (fastSmoothingFactor - slowSmoothingFactor) * t
-            let filtered = CGPoint(
-                x: last.x + (point.x - last.x) * factor,
-                y: last.y + (point.y - last.y) * factor
-            )
-            if distance(last, filtered) < 0.35 {
-                continue
-            }
-            result.append(filtered)
-        }
-        
-        // 笔画结束时，向真实终点靠近，避免尾端明显偏移
-        if isFinal, let actualLast = pts.last, result.count >= 2 {
-            let previous = result[result.count - 2]
-            result[result.count - 1] = CGPoint(
-                x: previous.x + (actualLast.x - previous.x) * 0.55,
-                y: previous.y + (actualLast.y - previous.y) * 0.55
-            )
-        }
-        return result
-    }
-    
-    /// 去除末端反向的短钩（拐弯处的小凸起主要来源）
-    private static func dropSharpTerminalHook(_ pts: [CGPoint]) -> [CGPoint] {
-        var result = pts
-        while result.count >= 3 {
-            let a = result[result.count - 3]
-            let b = result[result.count - 2]
-            let c = result[result.count - 1]
-            
-            let abx = b.x - a.x, aby = b.y - a.y
-            let bcx = c.x - b.x, bcy = c.y - b.y
-            let lab = hypot(abx, aby)
-            let lbc = hypot(bcx, bcy)
-            
-            guard lab > 0.001, lbc > 0.001 else {
-                result.removeLast()
-                continue
-            }
-            
-            let dot = (abx * bcx + aby * bcy) / (lab * lbc)
-            let isShortReverse = lbc < 10 && dot < 0
-            if !isShortReverse { break }
-            
-            result.removeLast()
-        }
-        return result
-    }
-    
-    /// 去除中间抖动很小的点
-    private static func removeTinyJitter(_ pts: [CGPoint]) -> [CGPoint] {
-        guard pts.count > 2 else { return pts }
-        var result: [CGPoint] = [pts[0]]
-        for index in 1..<(pts.count - 1) {
-            let previous = result[result.count - 1]
-            let current = pts[index]
-            let next = pts[index + 1]
-            
-            let d1 = distance(previous, current)
-            let d2 = distance(current, next)
-            if d1 < 1 || d2 < 1 { continue }
-            result.append(current)
-        }
-        result.append(pts[pts.count - 1])
-        return result
     }
     
     private static func distance(_ p1: CGPoint, _ p2: CGPoint) -> CGFloat {
@@ -328,15 +201,38 @@ public class ZLDrawPath: NSObject {
     }
     
     func drawPath() {
+        let isDot = points.count == 1
+        let point = points.first
+
         if willDelete {
             UIColor.white.set()
-            bgPath.stroke()
+            if isDot, let point {
+                UIBezierPath(
+                    arcCenter: point,
+                    radius: bgPath.lineWidth / 2,
+                    startAngle: 0,
+                    endAngle: .pi * 2,
+                    clockwise: true
+                ).fill()
+            } else {
+                bgPath.stroke()
+            }
             pathColor.withAlphaComponent(0.7).set()
         } else {
             pathColor.set()
         }
         
-        path.stroke()
+        if isDot, let point {
+            UIBezierPath(
+                arcCenter: point,
+                radius: path.lineWidth / 2,
+                startAngle: 0,
+                endAngle: .pi * 2,
+                clockwise: true
+            ).fill()
+        } else {
+            path.stroke()
+        }
     }
 }
 

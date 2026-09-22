@@ -27,6 +27,11 @@ let package = Package(
                 .process("ZLPhotoBrowser.bundle"),
                 .copy("PrivacyInfo.xcprivacy")
             ]
+        ),
+        .testTarget(
+            name: "ZLPhotoBrowserTests",
+            dependencies: ["ZLPhotoBrowser"],
+            path: "Tests/ZLPhotoBrowserTests"
         )
     ]
 )
