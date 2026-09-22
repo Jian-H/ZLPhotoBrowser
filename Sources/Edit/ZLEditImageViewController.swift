@@ -25,6 +25,7 @@
 //  THE SOFTWARE.
 
 import UIKit
+import QuartzCore
 
 public struct ZLClipStatus {
     var editRect: CGRect
@@ -246,6 +247,10 @@ open class ZLEditImageViewController: UIViewController {
     private var drawStrokeSession: ZLDrawStrokeSession?
     private var suppressNextTapAction = false
     private var activeDrawPath: ZLDrawPath?
+#if DEBUG
+    private var drawPreviewUpdateCount = 0
+    private var drawPreviewMaxDuration: CFTimeInterval = 0
+#endif
     private var impactFeedback: UIImpactFeedbackGenerator?
     
     // 第一次进入界面时，布局后frame，裁剪dimiss动画使用
@@ -1641,6 +1646,10 @@ open class ZLEditImageViewController: UIViewController {
 
         drawStrokeSession = session
         activeDrawPath = path
+#if DEBUG
+        drawPreviewUpdateCount = 0
+        drawPreviewMaxDuration = 0
+#endif
         path.addLines(initialPoints.dropFirst())
         suppressNextTapAction = true
         updateActiveDrawPathPreview()
@@ -1666,12 +1675,23 @@ open class ZLEditImageViewController: UIViewController {
     private func updateActiveDrawPathPreview() {
         guard let path = activeDrawPath,
               let session = drawStrokeSession else { return }
-        let previewPath = session.predictedPoints.isEmpty ? nil : path.previewPath(adding: session.predictedPoints)
-        drawingImageView.showPreview(path, previewPath: previewPath)
+#if DEBUG
+        let start = CACurrentMediaTime()
+#endif
+        let predictedPath = path.predictedPath(adding: session.predictedPoints)
+        drawingImageView.showPreview(path, predictedPath: predictedPath)
+#if DEBUG
+        drawPreviewUpdateCount += 1
+        drawPreviewMaxDuration = max(drawPreviewMaxDuration, CACurrentMediaTime() - start)
+#endif
     }
 
     private func finishActiveDrawPath() {
         guard let path = activeDrawPath else { return }
+#if DEBUG
+        let maxPreview = String(format: "%.3f", drawPreviewMaxDuration * 1000)
+        zl_debugPrint("[ZLDrawPerf] updates=\(drawPreviewUpdateCount) maxPreview=\(maxPreview)ms actualPoints=\(path.sampledPointCount)")
+#endif
         path.finishDrawing()
         drawPaths.append(path)
         drawingImageView.commit(path, allPaths: drawPaths)

@@ -9,6 +9,12 @@ final class ZLPhotoBrowserTests: XCTestCase {
         XCTAssertGreaterThan(alpha(in: image, at: CGPoint(x: 20, y: 20)), 0)
     }
 
+    func testSingleSampleCanBeHitByEraser() {
+        let path = makePath(start: CGPoint(x: 20, y: 20))
+
+        XCTAssertTrue(path.hitTest(CGPoint(x: 20, y: 20), extraRadius: 4))
+    }
+
     func testDenseSamplesAreRetainedAndReachTrueEndpoint() throws {
         let path = makePath(start: CGPoint(x: 10, y: 10))
         let samples = [
@@ -93,6 +99,7 @@ final class ZLPhotoBrowserTests: XCTestCase {
 
     static var allTests = [
         ("testSingleSampleRendersAsDot", testSingleSampleRendersAsDot),
+        ("testSingleSampleCanBeHitByEraser", testSingleSampleCanBeHitByEraser),
         ("testDenseSamplesAreRetainedAndReachTrueEndpoint", testDenseSamplesAreRetainedAndReachTrueEndpoint),
         ("testTileSnapshotKeepsCrossBoundaryStrokeAndInvalidatesLocally", testTileSnapshotKeepsCrossBoundaryStrokeAndInvalidatesLocally),
         ("testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions", testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions),

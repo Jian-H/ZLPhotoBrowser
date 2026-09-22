@@ -111,18 +111,24 @@ public class ZLDrawPath: NSObject {
         }
     }
 
-    func previewPath(adding points: [CGPoint]) -> UIBezierPath {
-        guard !points.isEmpty else { return path }
-        guard let preview = path.copy() as? UIBezierPath else { return path }
-        var last = self.points[self.points.count - 1]
+    func predictedPath(adding points: [CGPoint]) -> UIBezierPath? {
+        guard !points.isEmpty, let lastActualPoint = self.points.last else { return nil }
+        let preview = UIBezierPath()
+        preview.lineWidth = path.lineWidth
+        preview.lineCapStyle = .round
+        preview.lineJoinStyle = .round
+        preview.move(to: lastActualPoint)
+        var last = lastActualPoint
+        var hasPredictedPoint = false
         for point in points {
             let normalized = CGPoint(x: point.x / ratio, y: point.y / ratio)
             if Self.distance(last, normalized) > duplicatePointTolerance {
                 preview.addLine(to: normalized)
                 last = normalized
+                hasPredictedPoint = true
             }
         }
-        return preview
+        return hasPredictedPoint ? preview : nil
     }
     
     /// 保留 API 语义。路径已随每个原始触点增量追加，收笔时无需重建。
@@ -171,12 +177,27 @@ public class ZLDrawPath: NSObject {
         if let cache = strokedPathCache, abs(cache.strokeWidth - strokeWidth) < 0.01 {
             return cache.path
         }
-        let stroked = path.cgPath.copy(
-            strokingWithWidth: strokeWidth,
-            lineCap: .round,
-            lineJoin: .round,
-            miterLimit: 0
-        )
+        // A path containing only move(to:) has no segment for Core Graphics
+        // to stroke. Rendered dots are explicit circles, so use the same
+        // geometry for eraser hit testing instead of relying on an empty
+        // stroked path.
+        let stroked: CGPath
+        if let point = points.first, points.count == 1 {
+            stroked = UIBezierPath(
+                arcCenter: point,
+                radius: strokeWidth / 2,
+                startAngle: 0,
+                endAngle: .pi * 2,
+                clockwise: true
+            ).cgPath
+        } else {
+            stroked = path.cgPath.copy(
+                strokingWithWidth: strokeWidth,
+                lineCap: .round,
+                lineJoin: .round,
+                miterLimit: 0
+            )
+        }
         strokedPathCache = (strokeWidth, stroked)
         return stroked
     }

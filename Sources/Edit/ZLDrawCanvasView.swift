@@ -33,6 +33,7 @@ final class ZLDrawCanvasView: UIView {
     }
 
     private let previewLayer = CAShapeLayer()
+    private let predictedPreviewLayer = CAShapeLayer()
     private var renderSize: CGSize = .zero
     private var tiles: [Tile] = []
     private var tilePadding: CGFloat = 2
@@ -45,10 +46,15 @@ final class ZLDrawCanvasView: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = true
         layer.addSublayer(previewLayer)
+        layer.addSublayer(predictedPreviewLayer)
         displayLinkTarget.canvas = self
-        previewLayer.fillColor = UIColor.clear.cgColor
-        previewLayer.lineCap = .round
-        previewLayer.lineJoin = .round
+        for previewLayer in [previewLayer, predictedPreviewLayer] {
+            previewLayer.anchorPoint = .zero
+            previewLayer.position = .zero
+            previewLayer.fillColor = UIColor.clear.cgColor
+            previewLayer.lineCap = .round
+            previewLayer.lineJoin = .round
+        }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -60,7 +66,10 @@ final class ZLDrawCanvasView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layoutTiles()
-        previewLayer.frame = bounds
+        for previewLayer in [previewLayer, predictedPreviewLayer] {
+            previewLayer.bounds = bounds
+            previewLayer.position = .zero
+        }
     }
 
     func rebuild(paths: [ZLDrawPath], size: CGSize) {
@@ -68,15 +77,17 @@ final class ZLDrawCanvasView: UIView {
         renderSize = size
         tilePadding = requiredTilePadding(for: paths)
         previewLayer.path = nil
+        predictedPreviewLayer.path = nil
         makeTilesIfNeeded()
         tiles.forEach { render($0, paths: paths) }
     }
 
-    func showPreview(_ path: ZLDrawPath, previewPath: UIBezierPath? = nil) {
-        let visiblePath = previewPath ?? path.path
+    func showPreview(_ path: ZLDrawPath, predictedPath: UIBezierPath? = nil) {
         let scale = displayScale
-        var transform = CGAffineTransform(scaleX: scale, y: scale)
-        if path.sampledPointCount == 1, previewPath == nil {
+        let transform = CGAffineTransform(scaleX: scale, y: scale)
+        previewLayer.setAffineTransform(transform)
+        predictedPreviewLayer.setAffineTransform(transform)
+        if path.sampledPointCount == 1 {
             let dot = UIBezierPath(
                 arcCenter: path.path.currentPoint,
                 radius: path.path.lineWidth / 2,
@@ -86,13 +97,17 @@ final class ZLDrawCanvasView: UIView {
             )
             previewLayer.strokeColor = UIColor.clear.cgColor
             previewLayer.fillColor = path.strokeColor.cgColor
-            previewLayer.path = dot.cgPath.copy(using: &transform)
+            previewLayer.path = dot.cgPath
         } else {
             previewLayer.strokeColor = path.strokeColor.cgColor
             previewLayer.fillColor = UIColor.clear.cgColor
-            previewLayer.lineWidth = visiblePath.lineWidth * scale
-            previewLayer.path = visiblePath.cgPath.copy(using: &transform)
+            previewLayer.lineWidth = path.path.lineWidth
+            previewLayer.path = path.path.cgPath
         }
+        predictedPreviewLayer.strokeColor = path.strokeColor.cgColor
+        predictedPreviewLayer.fillColor = UIColor.clear.cgColor
+        predictedPreviewLayer.lineWidth = predictedPath?.lineWidth ?? path.path.lineWidth
+        predictedPreviewLayer.path = predictedPath?.cgPath
     }
 
     func commit(_ path: ZLDrawPath, allPaths: [ZLDrawPath]) {
@@ -100,6 +115,7 @@ final class ZLDrawCanvasView: UIView {
         if updateTilePadding(for: allPaths) {
             tiles.forEach { render($0, paths: allPaths) }
             previewLayer.path = nil
+            predictedPreviewLayer.path = nil
             return
         }
         for tile in tiles where tile.renderRect.intersects(path.renderBounds) {
@@ -111,6 +127,7 @@ final class ZLDrawCanvasView: UIView {
             }
         }
         previewLayer.path = nil
+        predictedPreviewLayer.path = nil
     }
 
     func invalidate(paths: [ZLDrawPath], using allPaths: [ZLDrawPath]) {
