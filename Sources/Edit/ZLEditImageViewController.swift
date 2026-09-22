@@ -242,19 +242,10 @@ open class ZLEditImageViewController: UIViewController {
     
     private var defaultDrawPathWidth: CGFloat = 0
     
-    private var processedDrawSampleCount = 0
-
     private lazy var drawTouchCollector = ZLDrawTouchCollector()
-    private var rawDrawSamples: [CGPoint] = []
-    private var predictedDrawSamples: [CGPoint] = []
-    private var isCollectingRawDrawTouch = false
-    private var panHandledDrawTouch = false
+    private var drawStrokeSession: ZLDrawStrokeSession?
     private var suppressNextTapAction = false
     private var activeDrawPath: ZLDrawPath?
-    private var pendingDrawFinishPoint: CGPoint?
-
-    /// Captured before UIPanGestureRecognizer crosses its recognition threshold.
-    private var initialDrawTouchPoint: CGPoint?
     private var impactFeedback: UIImpactFeedbackGenerator?
     
     // 第一次进入界面时，布局后frame，裁剪dimiss动画使用
@@ -1278,34 +1269,10 @@ open class ZLEditImageViewController: UIViewController {
         }
         
         if selectedTool == .draw {
-            let point = pan.location(in: drawingImageView)
-            let bufferedPoints = rawDrawSamples.isEmpty ? [point] : rawDrawSamples
             if pan.state == .began {
                 setToolView(show: false)
-                let startPoint = initialDrawTouchPoint ?? bufferedPoints.first ?? point
-                guard let path = makeDrawPath(startPoint: startPoint) else { return }
-                panHandledDrawTouch = true
-                activeDrawPath = path
-                drawPaths.append(path)
-                path.addLines(bufferedPoints.dropFirst())
-                processedDrawSampleCount = bufferedPoints.count
-                if rawDrawSamples.isEmpty, startPoint != point {
-                    path.addLine(to: point)
-                }
-                updateActiveDrawPathPreview()
-            } else if pan.state == .changed {
-                if rawDrawSamples.isEmpty {
-                    activeDrawPath?.addLine(to: point)
-                }
-                updateActiveDrawPathPreview()
             } else if pan.state == .cancelled || pan.state == .ended {
                 setToolView(show: true, delay: 0.5)
-                pendingDrawFinishPoint = point
-                // Give the raw collector for this same UIEvent a chance to
-                // append terminal coalesced samples before committing.
-                DispatchQueue.main.async { [weak self] in
-                    self?.finishActiveDrawPath()
-                }
             }
         } else if selectedTool == .mosaic {
             let point = pan.location(in: imageView)
@@ -1662,84 +1629,60 @@ open class ZLEditImageViewController: UIViewController {
         drawingImageView.rebuild(paths: drawPaths, size: size)
     }
 
-    private func previewPath(for path: ZLDrawPath, pan: UIPanGestureRecognizer) -> UIBezierPath {
-        path.previewPath(adding: predictedDrawSamples)
-    }
-
     private func beginRawDrawSamples(actual: [UITouch], predicted: [UITouch]) {
-        isCollectingRawDrawTouch = true
-        panHandledDrawTouch = false
-        rawDrawSamples.removeAll(keepingCapacity: true)
-        predictedDrawSamples.removeAll(keepingCapacity: true)
-        appendRawDrawSamples(actual: actual, predicted: predicted)
+        let actualPoints = actual.map { $0.location(in: drawingImageView) }
+        let predictedPoints = predicted.map { $0.location(in: drawingImageView) }
+        let session = ZLDrawStrokeSession(actualPoints: actualPoints)
+        session.append(actualPoints: [], predictedPoints: predictedPoints)
+        let initialPoints = session.takeUnrenderedActualPoints()
+
+        guard let startPoint = initialPoints.first,
+              let path = makeDrawPath(startPoint: startPoint) else { return }
+
+        drawStrokeSession = session
+        activeDrawPath = path
+        path.addLines(initialPoints.dropFirst())
+        suppressNextTapAction = true
+        updateActiveDrawPathPreview()
     }
 
     private func appendRawDrawSamples(actual: [UITouch], predicted: [UITouch]) {
-        guard isCollectingRawDrawTouch,
-              selectedTool == .draw,
-              !eraserBtn.isSelected else { return }
-        for touch in actual {
-            let point = touch.location(in: drawingImageView)
-            if rawDrawSamples.last != point { rawDrawSamples.append(point) }
-        }
-        predictedDrawSamples = predicted.map { $0.location(in: drawingImageView) }
+        guard let session = drawStrokeSession,
+              let path = activeDrawPath else { return }
+
+        session.append(
+            actualPoints: actual.map { $0.location(in: drawingImageView) },
+            predictedPoints: predicted.map { $0.location(in: drawingImageView) }
+        )
+        path.addLines(session.takeUnrenderedActualPoints())
         updateActiveDrawPathPreview()
     }
 
     private func finishRawDrawSamples(actual: [UITouch], predicted: [UITouch]) {
         appendRawDrawSamples(actual: actual, predicted: predicted)
-        defer {
-            isCollectingRawDrawTouch = false
-            predictedDrawSamples.removeAll(keepingCapacity: true)
-        }
-
-        // A tap or a short movement may finish before UIPanGestureRecognizer
-        // crosses its recognition threshold. The raw collector has already
-        // received every coalesced sample, so it must be the source of truth
-        // here; keeping only the start point turns a real short stroke into a
-        // dot and makes fast handwriting appear to lose segments.
-        guard !panHandledDrawTouch,
-              let startPoint = rawDrawSamples.first,
-              let path = makeDrawPath(startPoint: startPoint) else { return }
-        path.addLines(rawDrawSamples.dropFirst())
-        path.finishDrawing()
-        drawPaths.append(path)
-        drawingImageView.commit(path, allPaths: drawPaths)
-        editorManager.storeAction(.draw(path))
-        suppressNextTapAction = true
-        DispatchQueue.main.async { [weak self] in
-            self?.suppressNextTapAction = false
-        }
-        rawDrawSamples.removeAll(keepingCapacity: true)
-        initialDrawTouchPoint = nil
+        finishActiveDrawPath()
     }
 
     private func updateActiveDrawPathPreview() {
-        guard let path = activeDrawPath else { return }
-        let newSamples = rawDrawSamples.dropFirst(processedDrawSampleCount)
-        if !newSamples.isEmpty {
-            path.addLines(newSamples)
-            processedDrawSampleCount = rawDrawSamples.count
-        }
-        drawingImageView.showPreview(path, previewPath: previewPath(for: path, pan: panGes))
+        guard let path = activeDrawPath,
+              let session = drawStrokeSession else { return }
+        let previewPath = session.predictedPoints.isEmpty ? nil : path.previewPath(adding: session.predictedPoints)
+        drawingImageView.showPreview(path, previewPath: previewPath)
     }
 
     private func finishActiveDrawPath() {
         guard let path = activeDrawPath else { return }
-        updateActiveDrawPathPreview()
-        if rawDrawSamples.isEmpty, let point = pendingDrawFinishPoint {
-            path.addLine(to: point)
-        }
         path.finishDrawing()
+        drawPaths.append(path)
         drawingImageView.commit(path, allPaths: drawPaths)
         editorManager.storeAction(.draw(path))
 
         activeDrawPath = nil
-        pendingDrawFinishPoint = nil
-        processedDrawSampleCount = 0
-        initialDrawTouchPoint = nil
-        rawDrawSamples.removeAll(keepingCapacity: true)
-        predictedDrawSamples.removeAll(keepingCapacity: true)
+        drawStrokeSession?.clearPredictedPoints()
+        drawStrokeSession = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.suppressNextTapAction = false
+        }
     }
 
     private func shouldCollectDrawTouch(_ touch: UITouch) -> Bool {
@@ -1937,15 +1880,6 @@ open class ZLEditImageViewController: UIViewController {
 // MARK: UIGestureRecognizerDelegate
 
 extension ZLEditImageViewController: UIGestureRecognizerDelegate {
-    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        if gestureRecognizer === panGes,
-           selectedTool == .draw,
-           !eraserBtn.isSelected {
-            initialDrawTouchPoint = touch.location(in: drawingImageView)
-        }
-        return true
-    }
-
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard imageStickerContainerIsHidden else {
             return false

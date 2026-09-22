@@ -76,9 +76,23 @@ final class ZLDrawCanvasView: UIView {
         let visiblePath = previewPath ?? path.path
         let scale = displayScale
         var transform = CGAffineTransform(scaleX: scale, y: scale)
-        previewLayer.strokeColor = path.strokeColor.cgColor
-        previewLayer.lineWidth = visiblePath.lineWidth * scale
-        previewLayer.path = visiblePath.cgPath.copy(using: &transform)
+        if path.sampledPointCount == 1, previewPath == nil {
+            let dot = UIBezierPath(
+                arcCenter: path.path.currentPoint,
+                radius: path.path.lineWidth / 2,
+                startAngle: 0,
+                endAngle: .pi * 2,
+                clockwise: true
+            )
+            previewLayer.strokeColor = UIColor.clear.cgColor
+            previewLayer.fillColor = path.strokeColor.cgColor
+            previewLayer.path = dot.cgPath.copy(using: &transform)
+        } else {
+            previewLayer.strokeColor = path.strokeColor.cgColor
+            previewLayer.fillColor = UIColor.clear.cgColor
+            previewLayer.lineWidth = visiblePath.lineWidth * scale
+            previewLayer.path = visiblePath.cgPath.copy(using: &transform)
+        }
     }
 
     func commit(_ path: ZLDrawPath, allPaths: [ZLDrawPath]) {

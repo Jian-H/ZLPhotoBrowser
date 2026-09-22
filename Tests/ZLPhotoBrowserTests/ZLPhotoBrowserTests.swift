@@ -77,6 +77,20 @@ final class ZLPhotoBrowserTests: XCTestCase {
         XCTAssertTrue(session.takeUnrenderedActualPoints().isEmpty)
     }
 
+    func testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves() {
+        let canvas = ZLDrawCanvasView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        canvas.layoutIfNeeded()
+        canvas.rebuild(paths: [], size: CGSize(width: 40, height: 40))
+
+        let path = makePath(start: CGPoint(x: 20, y: 20))
+        canvas.showPreview(path)
+
+        let image = UIGraphicsImageRenderer(size: canvas.bounds.size).image { context in
+            canvas.layer.render(in: context.cgContext)
+        }
+        XCTAssertGreaterThan(alpha(in: image, at: CGPoint(x: 20, y: 20)), 0)
+    }
+
     static var allTests = [
         ("testSingleSampleRendersAsDot", testSingleSampleRendersAsDot),
         ("testDenseSamplesAreRetainedAndReachTrueEndpoint", testDenseSamplesAreRetainedAndReachTrueEndpoint),
@@ -84,6 +98,7 @@ final class ZLPhotoBrowserTests: XCTestCase {
         ("testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions", testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions),
         ("testDrawStrokeSessionReplaysAShortStrokeIntoItsPath", testDrawStrokeSessionReplaysAShortStrokeIntoItsPath),
         ("testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch", testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch),
+        ("testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves", testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves),
     ]
 
     private func makePath(start: CGPoint) -> ZLDrawPath {
