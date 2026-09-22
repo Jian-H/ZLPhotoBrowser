@@ -2,6 +2,14 @@
 
 -----
 
+## [5.0.1](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.1) (2026-09-22)
+### Fix
+* Improved doodle input fidelity: raw touch samples now drive the active stroke immediately, including fast and short strokes.
+* Improved doodle preview so the initial touch point is visible before the finger moves or lifts.
+* Reduced drawing stalls by retaining the tiled canvas renderer for completed strokes.
+
+---
+
 ## [5.0.0](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.0) (2026-06-25)
 ### Add
 * Optimized UI for iPad multitasking and custom window sizes for a smoother experience.
@@ -1211,4 +1219,3 @@ early
 * 支持预览确定选择的图片，并可选择修改.
 * 支持预览确定选择的gif、video.
 ...
-
