@@ -14,6 +14,11 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
     /// decide whether the current touch belongs to the drawable image area.
     var shouldCollect: ((UITouch) -> Bool)?
 
+    /// Eligibility is deliberately captured on `touchesBegan`. Re-evaluating
+    /// it on the terminal event loses a short stroke when another recognizer
+    /// changes scroll or toolbar state between the two callbacks.
+    private var collectedTouch: UITouch?
+
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
         cancelsTouchesInView = false
@@ -22,23 +27,37 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        deliver(touches, event: event, handler: began)
+        guard collectedTouch == nil,
+              let touch = touches.first(where: { shouldCollect?($0) ?? true }) else {
+            super.touchesBegan(touches, with: event)
+            return
+        }
+        collectedTouch = touch
+        deliver(touch, event: event, handler: began)
         super.touchesBegan(touches, with: event)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
-        deliver(touches, event: event, handler: moved)
+        if let touch = collectedTouch, touches.contains(where: { $0 === touch }) {
+            deliver(touch, event: event, handler: moved)
+        }
         super.touchesMoved(touches, with: event)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        deliver(touches, event: event, handler: ended)
+        if let touch = collectedTouch, touches.contains(where: { $0 === touch }) {
+            deliver(touch, event: event, handler: ended)
+            collectedTouch = nil
+        }
         super.touchesEnded(touches, with: event)
         state = .failed
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        deliver(touches, event: event, handler: ended)
+        if let touch = collectedTouch, touches.contains(where: { $0 === touch }) {
+            deliver(touch, event: event, handler: ended)
+            collectedTouch = nil
+        }
         super.touchesCancelled(touches, with: event)
         state = .failed
     }
@@ -46,9 +65,7 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
     override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 
-    private func deliver(_ touches: Set<UITouch>, event: UIEvent, handler: SamplesHandler?) {
-        guard let touch = touches.first else { return }
-        guard shouldCollect?(touch) ?? true else { return }
+    private func deliver(_ touch: UITouch, event: UIEvent, handler: SamplesHandler?) {
         handler?(event.coalescedTouches(for: touch) ?? [touch], event.predictedTouches(for: touch) ?? [])
     }
 }
