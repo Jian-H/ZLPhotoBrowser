@@ -1693,12 +1693,15 @@ open class ZLEditImageViewController: UIViewController {
             predictedDrawSamples.removeAll(keepingCapacity: true)
         }
 
-        // A tap or a sub-threshold movement never makes UIPanGestureRecognizer
-        // begin. Keep its true landing point as a dot, rather than silently
-        // discarding a deliberately small mark.
+        // A tap or a short movement may finish before UIPanGestureRecognizer
+        // crosses its recognition threshold. The raw collector has already
+        // received every coalesced sample, so it must be the source of truth
+        // here; keeping only the start point turns a real short stroke into a
+        // dot and makes fast handwriting appear to lose segments.
         guard !panHandledDrawTouch,
               let startPoint = rawDrawSamples.first,
               let path = makeDrawPath(startPoint: startPoint) else { return }
+        path.addLines(rawDrawSamples.dropFirst())
         path.finishDrawing()
         drawPaths.append(path)
         drawingImageView.commit(path, allPaths: drawPaths)
