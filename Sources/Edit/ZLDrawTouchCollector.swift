@@ -69,3 +69,37 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
         handler?(event.coalescedTouches(for: touch) ?? [touch], event.predictedTouches(for: touch) ?? [])
     }
 }
+
+/// Keeps one drawing touch's real and predicted samples independent from
+/// UIKit gesture-recognizer state. Only real points are consumed into the
+/// persisted ZLDrawPath; predicted points are intentionally preview-only.
+final class ZLDrawStrokeSession {
+    private var actualPoints: [CGPoint]
+    private var nextUnrenderedActualPointIndex = 0
+
+    private(set) var predictedPoints: [CGPoint] = []
+
+    init(actualPoints: [CGPoint]) {
+        self.actualPoints = actualPoints
+    }
+
+    func append(actualPoints: [CGPoint], predictedPoints: [CGPoint]) {
+        for point in actualPoints where self.actualPoints.last != point {
+            self.actualPoints.append(point)
+        }
+        self.predictedPoints = predictedPoints
+    }
+
+    func takeUnrenderedActualPoints() -> ArraySlice<CGPoint> {
+        guard nextUnrenderedActualPointIndex < actualPoints.count else {
+            return []
+        }
+        let points = actualPoints[nextUnrenderedActualPointIndex...]
+        nextUnrenderedActualPointIndex = actualPoints.count
+        return points
+    }
+
+    func clearPredictedPoints() {
+        predictedPoints.removeAll(keepingCapacity: true)
+    }
+}

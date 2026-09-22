@@ -43,10 +43,47 @@ final class ZLPhotoBrowserTests: XCTestCase {
         XCTAssertEqual(alpha(in: invalidated, at: CGPoint(x: 256, y: 128)), 0)
     }
 
+    func testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions() {
+        let start = CGPoint(x: 10, y: 10)
+        let actual = [CGPoint(x: 10.2, y: 10.1), CGPoint(x: 11, y: 10.5)]
+        let predicted = [CGPoint(x: 12, y: 11)]
+        let session = ZLDrawStrokeSession(actualPoints: [start])
+
+        XCTAssertEqual(Array(session.takeUnrenderedActualPoints()), [start])
+        session.append(actualPoints: actual, predictedPoints: predicted)
+
+        XCTAssertEqual(Array(session.takeUnrenderedActualPoints()), actual)
+        XCTAssertEqual(session.predictedPoints, predicted)
+        session.clearPredictedPoints()
+        XCTAssertTrue(session.predictedPoints.isEmpty)
+    }
+
+    func testDrawStrokeSessionReplaysAShortStrokeIntoItsPath() {
+        let start = CGPoint(x: 10, y: 10)
+        let end = CGPoint(x: 14, y: 13)
+        let session = ZLDrawStrokeSession(actualPoints: [start])
+        let path = makePath(start: start)
+        _ = session.takeUnrenderedActualPoints()
+        session.append(actualPoints: [CGPoint(x: 12, y: 11), end], predictedPoints: [])
+        path.addLines(session.takeUnrenderedActualPoints())
+
+        XCTAssertEqual(path.sampledPointCount, 3)
+        XCTAssertEqual(path.path.currentPoint, end)
+    }
+
+    func testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch() {
+        let session = ZLDrawStrokeSession(actualPoints: [])
+
+        XCTAssertTrue(session.takeUnrenderedActualPoints().isEmpty)
+    }
+
     static var allTests = [
         ("testSingleSampleRendersAsDot", testSingleSampleRendersAsDot),
         ("testDenseSamplesAreRetainedAndReachTrueEndpoint", testDenseSamplesAreRetainedAndReachTrueEndpoint),
         ("testTileSnapshotKeepsCrossBoundaryStrokeAndInvalidatesLocally", testTileSnapshotKeepsCrossBoundaryStrokeAndInvalidatesLocally),
+        ("testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions", testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions),
+        ("testDrawStrokeSessionReplaysAShortStrokeIntoItsPath", testDrawStrokeSessionReplaysAShortStrokeIntoItsPath),
+        ("testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch", testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch),
     ]
 
     private func makePath(start: CGPoint) -> ZLDrawPath {
