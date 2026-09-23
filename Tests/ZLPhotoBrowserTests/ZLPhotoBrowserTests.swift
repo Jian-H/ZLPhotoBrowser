@@ -83,6 +83,29 @@ final class ZLPhotoBrowserTests: XCTestCase {
         XCTAssertTrue(session.takeUnrenderedActualPoints().isEmpty)
     }
 
+    func testEraserTouchEligibilityRejectsTheButtonExpandedHitArea() {
+        let eraserButton = ZLEnlargeButton(frame: CGRect(x: 0, y: 0, width: 36, height: 36))
+        eraserButton.enlargeInset = 30
+
+        XCTAssertTrue(
+            ZLEditImageViewController.isPointInsideDrawControl(
+                CGPoint(x: -10, y: 18),
+                control: eraserButton
+            )
+        )
+    }
+
+    func testDrawTouchEligibilityRejectsColorCollectionViewArea() {
+        let colorCollectionView = UIView(frame: CGRect(x: 0, y: 0, width: 240, height: 50))
+
+        XCTAssertTrue(
+            ZLEditImageViewController.isPointInsideDrawControl(
+                CGPoint(x: 120, y: 25),
+                control: colorCollectionView
+            )
+        )
+    }
+
     func testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves() {
         let canvas = ZLDrawCanvasView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
         canvas.layoutIfNeeded()
@@ -105,6 +128,8 @@ final class ZLPhotoBrowserTests: XCTestCase {
         ("testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions", testDrawStrokeSessionPreservesEveryActualPointAndSeparatesPredictions),
         ("testDrawStrokeSessionReplaysAShortStrokeIntoItsPath", testDrawStrokeSessionReplaysAShortStrokeIntoItsPath),
         ("testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch", testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch),
+        ("testEraserTouchEligibilityRejectsTheButtonExpandedHitArea", testEraserTouchEligibilityRejectsTheButtonExpandedHitArea),
+        ("testDrawTouchEligibilityRejectsColorCollectionViewArea", testDrawTouchEligibilityRejectsColorCollectionViewArea),
         ("testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves", testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves),
     ]
 

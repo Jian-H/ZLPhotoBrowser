@@ -1710,8 +1710,27 @@ open class ZLEditImageViewController: UIViewController {
               !eraserBtn.isSelected,
               imageStickerContainerIsHidden,
               !isScrolling else { return false }
+        guard !Self.isPointInsideDrawControl(
+            touch.location(in: eraserBtn),
+            control: eraserBtn
+        ) else {
+            return false
+        }
+        if let drawColorCollectionView,
+           !drawColorCollectionView.isHidden,
+           drawColorCollectionView.alpha > 0,
+           Self.isPointInsideDrawControl(
+               touch.location(in: drawColorCollectionView),
+               control: drawColorCollectionView
+           ) {
+            return false
+        }
         let point = touch.location(in: drawingImageView)
         return drawingImageView.bounds.contains(point)
+    }
+
+    static func isPointInsideDrawControl(_ point: CGPoint, control: UIView) -> Bool {
+        control.point(inside: point, with: nil)
     }
 
     private func makeDrawPath(startPoint: CGPoint) -> ZLDrawPath? {

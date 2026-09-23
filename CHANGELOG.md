@@ -2,6 +2,14 @@
 
 -----
 
+## [5.0.3](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.3) (2026-09-23)
+### Fix
+* Fixed a dot being drawn on the canvas when selecting the eraser.
+* Fixed a dot being drawn on the canvas when selecting a draw color.
+* Preserved normal canvas drawing while filtering toolbar touches.
+
+---
+
 ## [5.0.1](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.1) (2026-09-22)
 ### Fix
 * Improved doodle input fidelity: raw touch samples now drive the active stroke immediately, including fast and short strokes.
