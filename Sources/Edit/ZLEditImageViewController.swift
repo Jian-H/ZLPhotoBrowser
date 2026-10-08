@@ -202,8 +202,6 @@ open class ZLEditImageViewController: UIViewController {
     
     private var stickers: [ZLBaseStickerView] = []
     
-    private var isScrolling = false
-    
     private var shouldLayout = true
     
     private var isFirstSetContainerFrame = true
@@ -794,7 +792,6 @@ open class ZLEditImageViewController: UIViewController {
         }
         
         originalFrame = view.convert(containerView.frame, from: mainScrollView)
-        isScrolling = false
     }
     
     private func setupUI() {
@@ -1709,7 +1706,7 @@ open class ZLEditImageViewController: UIViewController {
         guard selectedTool == .draw,
               !eraserBtn.isSelected,
               imageStickerContainerIsHidden,
-              !isScrolling else { return false }
+              !isPinchInteractionActive else { return false }
         guard !Self.isPointInsideDrawControl(
             touch.location(in: eraserBtn),
             control: eraserBtn
@@ -1731,6 +1728,36 @@ open class ZLEditImageViewController: UIViewController {
 
     static func isPointInsideDrawControl(_ point: CGPoint, control: UIView) -> Bool {
         control.point(inside: point, with: nil)
+    }
+
+    static func shouldBlockDrawing(
+        scrollPanState _: UIGestureRecognizer.State,
+        pinchState: UIGestureRecognizer.State,
+        isDecelerating _: Bool
+    ) -> Bool {
+        // The drawing recognizer owns single-finger input. The scroll view's
+        // pan recognizer already waits for it to fail, so scroll movement and
+        // deceleration must not prevent a new stroke from starting.
+        isActiveGestureState(pinchState)
+    }
+
+    static func effectiveDrawLineWidth(configuredWidth: CGFloat, zoomScale: CGFloat) -> CGFloat {
+        // The canvas is inside the zoomed content view, so UIKit already scales
+        // the rendered stroke. Applying zoomScale here would permanently change
+        // the stroke width stored in image coordinates.
+        configuredWidth
+    }
+
+    private static func isActiveGestureState(_ state: UIGestureRecognizer.State) -> Bool {
+        state == .began || state == .changed
+    }
+
+    private var isPinchInteractionActive: Bool {
+        Self.shouldBlockDrawing(
+            scrollPanState: mainScrollView.panGestureRecognizer.state,
+            pinchState: mainScrollView.pinchGestureRecognizer?.state ?? .possible,
+            isDecelerating: mainScrollView.isDecelerating
+        )
     }
 
     private func makeDrawPath(startPoint: CGPoint) -> ZLDrawPath? {
@@ -1757,7 +1784,10 @@ open class ZLEditImageViewController: UIViewController {
         let imageScale = ZLEditImageViewController.maxDrawLineImageWidth / referenceLength
         return ZLDrawPath(
             pathColor: currentDrawColor,
-            pathWidth: drawLineWidth / mainScrollView.zoomScale,
+            pathWidth: Self.effectiveDrawLineWidth(
+                configuredWidth: drawLineWidth,
+                zoomScale: mainScrollView.zoomScale
+            ),
             defaultLinePath: defaultDrawPathWidth,
             ratio: ratio / originalRatio / imageScale,
             startPoint: startPoint
@@ -1942,7 +1972,7 @@ extension ZLEditImageViewController: UIGestureRecognizerDelegate {
             guard let selectedTool = selectedTool else {
                 return false
             }
-            return (selectedTool == .draw || selectedTool == .mosaic) && !isScrolling
+            return (selectedTool == .draw || selectedTool == .mosaic) && !isPinchInteractionActive
         }
         
         return true
@@ -1961,38 +1991,9 @@ extension ZLEditImageViewController: UIScrollViewDelegate {
         let offsetY = (scrollView.frame.height > scrollView.contentSize.height) ? (scrollView.frame.height - scrollView.contentSize.height) * 0.5 : 0
         containerView.center = CGPoint(x: scrollView.contentSize.width * 0.5 + offsetX, y: scrollView.contentSize.height * 0.5 + offsetY)
     }
+
+    public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {}
     
-    public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-        isScrolling = false
-    }
-    
-    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard scrollView == mainScrollView else {
-            return
-        }
-        isScrolling = true
-    }
-    
-    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        guard scrollView == mainScrollView else {
-            return
-        }
-        isScrolling = decelerate
-    }
-    
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        guard scrollView == mainScrollView else {
-            return
-        }
-        isScrolling = false
-    }
-    
-    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        guard scrollView == mainScrollView else {
-            return
-        }
-        isScrolling = false
-    }
 }
 
 // MARK: collection view data source & delegate

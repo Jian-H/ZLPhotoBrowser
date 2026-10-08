@@ -45,25 +45,55 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let touch = collectedTouch, touches.contains(where: { $0 === touch }) {
-            deliver(touch, event: event, handler: ended)
-            collectedTouch = nil
-        }
+        let shouldFinish = finishCollectedTouch(in: touches, event: event, handler: ended)
         super.touchesEnded(touches, with: event)
-        state = .failed
+        if shouldFinish {
+            state = .failed
+        }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let touch = collectedTouch, touches.contains(where: { $0 === touch }) {
-            deliver(touch, event: event, handler: ended)
-            collectedTouch = nil
-        }
+        let shouldFinish = finishCollectedTouch(in: touches, event: event, handler: ended)
         super.touchesCancelled(touches, with: event)
-        state = .failed
+        if shouldFinish {
+            state = .failed
+        }
+    }
+
+    override func reset() {
+        collectedTouch = nil
+        super.reset()
     }
 
     override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+    static func shouldFinishTracking(
+        hasCollectedTouch: Bool,
+        collectedTouchIsEnding: Bool
+    ) -> Bool {
+        !hasCollectedTouch || collectedTouchIsEnding
+    }
+
+    private func finishCollectedTouch(
+        in touches: Set<UITouch>,
+        event: UIEvent,
+        handler: SamplesHandler?
+    ) -> Bool {
+        let touch = collectedTouch
+        let collectedTouchIsEnding = touch.map { collected in
+            touches.contains(where: { $0 === collected })
+        } ?? false
+        let shouldFinish = Self.shouldFinishTracking(
+            hasCollectedTouch: touch != nil,
+            collectedTouchIsEnding: collectedTouchIsEnding
+        )
+        guard shouldFinish, let touch else { return shouldFinish }
+
+        deliver(touch, event: event, handler: handler)
+        collectedTouch = nil
+        return true
+    }
 
     private func deliver(_ touch: UITouch, event: UIEvent, handler: SamplesHandler?) {
         handler?(event.coalescedTouches(for: touch) ?? [touch], event.predictedTouches(for: touch) ?? [])

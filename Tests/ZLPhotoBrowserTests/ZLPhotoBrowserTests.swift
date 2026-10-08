@@ -106,6 +106,70 @@ final class ZLPhotoBrowserTests: XCTestCase {
         )
     }
 
+    func testDrawGestureIsAvailableAfterZoomEnds() {
+        XCTAssertFalse(
+            ZLEditImageViewController.shouldBlockDrawing(
+                scrollPanState: .possible,
+                pinchState: .ended,
+                isDecelerating: false
+            )
+        )
+    }
+
+    func testSingleFingerDrawingHasPriorityOverScrollPanAfterZoom() {
+        XCTAssertFalse(
+            ZLEditImageViewController.shouldBlockDrawing(
+                scrollPanState: .changed,
+                pinchState: .possible,
+                isDecelerating: false
+            )
+        )
+    }
+
+    func testDrawGestureIsBlockedWhilePinching() {
+        XCTAssertTrue(
+            ZLEditImageViewController.shouldBlockDrawing(
+                scrollPanState: .possible,
+                pinchState: .changed,
+                isDecelerating: false,
+            )
+        )
+    }
+
+    func testDrawTouchCollectorOnlyFinishesWhenTheTrackedTouchEnds() {
+        XCTAssertFalse(
+            ZLDrawTouchCollector.shouldFinishTracking(
+                hasCollectedTouch: true,
+                collectedTouchIsEnding: false
+            )
+        )
+        XCTAssertTrue(
+            ZLDrawTouchCollector.shouldFinishTracking(
+                hasCollectedTouch: true,
+                collectedTouchIsEnding: true
+            )
+        )
+    }
+
+    func testDrawLineWidthDoesNotChangeWithImageZoomScale() {
+        let configuredWidth: CGFloat = 6
+
+        XCTAssertEqual(
+            ZLEditImageViewController.effectiveDrawLineWidth(
+                configuredWidth: configuredWidth,
+                zoomScale: 1
+            ),
+            configuredWidth
+        )
+        XCTAssertEqual(
+            ZLEditImageViewController.effectiveDrawLineWidth(
+                configuredWidth: configuredWidth,
+                zoomScale: 3
+            ),
+            configuredWidth
+        )
+    }
+
     func testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves() {
         let canvas = ZLDrawCanvasView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
         canvas.layoutIfNeeded()
@@ -130,6 +194,11 @@ final class ZLPhotoBrowserTests: XCTestCase {
         ("testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch", testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch),
         ("testEraserTouchEligibilityRejectsTheButtonExpandedHitArea", testEraserTouchEligibilityRejectsTheButtonExpandedHitArea),
         ("testDrawTouchEligibilityRejectsColorCollectionViewArea", testDrawTouchEligibilityRejectsColorCollectionViewArea),
+        ("testDrawGestureIsAvailableAfterZoomEnds", testDrawGestureIsAvailableAfterZoomEnds),
+        ("testSingleFingerDrawingHasPriorityOverScrollPanAfterZoom", testSingleFingerDrawingHasPriorityOverScrollPanAfterZoom),
+        ("testDrawGestureIsBlockedWhilePinching", testDrawGestureIsBlockedWhilePinching),
+        ("testDrawTouchCollectorOnlyFinishesWhenTheTrackedTouchEnds", testDrawTouchCollectorOnlyFinishesWhenTheTrackedTouchEnds),
+        ("testDrawLineWidthDoesNotChangeWithImageZoomScale", testDrawLineWidthDoesNotChangeWithImageZoomScale),
         ("testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves", testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves),
     ]
 
