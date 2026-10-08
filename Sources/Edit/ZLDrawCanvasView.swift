@@ -83,6 +83,10 @@ final class ZLDrawCanvasView: UIView {
     }
 
     func showPreview(_ path: ZLDrawPath, predictedPath: UIBezierPath? = nil) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
         let scale = displayScale
         let transform = CGAffineTransform(scaleX: scale, y: scale)
         previewLayer.setAffineTransform(transform)
@@ -111,6 +115,9 @@ final class ZLDrawCanvasView: UIView {
     }
 
     func clearPreview() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         previewLayer.path = nil
         predictedPreviewLayer.path = nil
     }
@@ -119,8 +126,7 @@ final class ZLDrawCanvasView: UIView {
         flushPendingInvalidation()
         if updateTilePadding(for: allPaths) {
             tiles.forEach { render($0, paths: allPaths) }
-            previewLayer.path = nil
-            predictedPreviewLayer.path = nil
+            clearPreview()
             return
         }
         for tile in tiles where tile.renderRect.intersects(path.renderBounds) {
@@ -131,8 +137,7 @@ final class ZLDrawCanvasView: UIView {
                 path.drawPath()
             }
         }
-        previewLayer.path = nil
-        predictedPreviewLayer.path = nil
+        clearPreview()
     }
 
     func invalidate(paths: [ZLDrawPath], using allPaths: [ZLDrawPath]) {

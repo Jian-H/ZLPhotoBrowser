@@ -1718,18 +1718,16 @@ open class ZLEditImageViewController: UIViewController {
               !eraserBtn.isSelected,
               imageStickerContainerIsHidden,
               !isPinchInteractionActive else { return false }
-        guard !Self.isPointInsideDrawControl(
-            touch.location(in: eraserBtn),
-            control: eraserBtn
-        ) else {
-            return false
-        }
-        if let drawColorCollectionView,
-           !drawColorCollectionView.isHidden,
-           drawColorCollectionView.alpha > 0,
-           Self.isPointInsideDrawControl(
-               touch.location(in: drawColorCollectionView),
-               control: drawColorCollectionView
+        if bottomShadowView.alpha > 0,
+           Self.isPointInsideAnyDrawControl(
+               touch.location(in: view),
+               in: view,
+               controls: [
+                   editToolCollectionView,
+                   eraserBtn,
+                   drawColorCollectionView,
+                   doneBtn
+               ].compactMap({ $0 })
            ) {
             return false
         }
@@ -1739,6 +1737,19 @@ open class ZLEditImageViewController: UIViewController {
 
     static func isPointInsideDrawControl(_ point: CGPoint, control: UIView) -> Bool {
         control.point(inside: point, with: nil)
+    }
+
+    static func isPointInsideAnyDrawControl(
+        _ point: CGPoint,
+        in view: UIView,
+        controls: [UIView]
+    ) -> Bool {
+        controls.contains { control in
+            guard !control.isHidden, control.alpha > 0, control.bounds.width > 0, control.bounds.height > 0 else {
+                return false
+            }
+            return control.convert(control.bounds, to: view).contains(point)
+        }
     }
 
     static func shouldBlockDrawing(

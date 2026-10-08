@@ -106,6 +106,20 @@ final class ZLPhotoBrowserTests: XCTestCase {
         )
     }
 
+    func testDrawTouchEligibilityRejectsEditToolCollectionViewArea() {
+        let rootView = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let editToolCollectionView = UIView(frame: CGRect(x: 20, y: 490, width: 240, height: 30))
+        rootView.addSubview(editToolCollectionView)
+
+        XCTAssertTrue(
+            ZLEditImageViewController.isPointInsideAnyDrawControl(
+                CGPoint(x: 40, y: 505),
+                in: rootView,
+                controls: [editToolCollectionView]
+            )
+        )
+    }
+
     func testDrawGestureIsAvailableAfterZoomEnds() {
         XCTAssertFalse(
             ZLEditImageViewController.shouldBlockDrawing(
@@ -228,6 +242,7 @@ final class ZLPhotoBrowserTests: XCTestCase {
         ("testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch", testDrawStrokeSessionHasNoPendingPointsForAnEmptyBatch),
         ("testEraserTouchEligibilityRejectsTheButtonExpandedHitArea", testEraserTouchEligibilityRejectsTheButtonExpandedHitArea),
         ("testDrawTouchEligibilityRejectsColorCollectionViewArea", testDrawTouchEligibilityRejectsColorCollectionViewArea),
+        ("testDrawTouchEligibilityRejectsEditToolCollectionViewArea", testDrawTouchEligibilityRejectsEditToolCollectionViewArea),
         ("testDrawGestureIsAvailableAfterZoomEnds", testDrawGestureIsAvailableAfterZoomEnds),
         ("testSingleFingerDrawingHasPriorityOverScrollPanAfterZoom", testSingleFingerDrawingHasPriorityOverScrollPanAfterZoom),
         ("testDrawGestureIsBlockedWhilePinching", testDrawGestureIsBlockedWhilePinching),

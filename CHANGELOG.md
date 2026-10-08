@@ -2,6 +2,13 @@
 
 -----
 
+## [5.0.5](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.5) (2026-10-08)
+### Fix
+* Prevented toolbar taps from creating stray doodle dots.
+* Removed the visible first-stroke preview drift.
+
+---
+
 ## [5.0.4](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.4) (2026-10-08)
 ### Fix
 * Restored doodle drawing after zooming or scaling an image.
