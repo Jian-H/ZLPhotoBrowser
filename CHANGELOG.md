@@ -2,6 +2,14 @@
 
 -----
 
+## [5.0.4](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.4) (2026-10-08)
+### Fix
+* Restored doodle drawing after zooming or scaling an image.
+* Kept doodle line width consistent across image zoom levels.
+* Prevented two-finger zoom gestures from leaving partial doodle strokes.
+
+---
+
 ## [5.0.3](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.3) (2026-09-23)
 ### Fix
 * Fixed a dot being drawn on the canvas when selecting the eraser.

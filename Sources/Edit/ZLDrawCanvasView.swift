@@ -110,6 +110,11 @@ final class ZLDrawCanvasView: UIView {
         predictedPreviewLayer.path = predictedPath?.cgPath
     }
 
+    func clearPreview() {
+        previewLayer.path = nil
+        predictedPreviewLayer.path = nil
+    }
+
     func commit(_ path: ZLDrawPath, allPaths: [ZLDrawPath]) {
         flushPendingInvalidation()
         if updateTilePadding(for: allPaths) {

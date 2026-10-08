@@ -972,6 +972,9 @@ open class ZLEditImageViewController: UIViewController {
         drawTouchCollector.ended = { [weak self] actual, predicted in
             self?.finishRawDrawSamples(actual: actual, predicted: predicted)
         }
+        drawTouchCollector.cancelled = { [weak self] in
+            self?.cancelRawDrawSamples()
+        }
         view.addGestureRecognizer(drawTouchCollector)
         mainScrollView.panGestureRecognizer.require(toFail: panGes)
         
@@ -1667,6 +1670,14 @@ open class ZLEditImageViewController: UIViewController {
     private func finishRawDrawSamples(actual: [UITouch], predicted: [UITouch]) {
         appendRawDrawSamples(actual: actual, predicted: predicted)
         finishActiveDrawPath()
+    }
+
+    private func cancelRawDrawSamples() {
+        activeDrawPath = nil
+        drawStrokeSession?.clearPredictedPoints()
+        drawStrokeSession = nil
+        drawingImageView.clearPreview()
+        suppressNextTapAction = false
     }
 
     private func updateActiveDrawPathPreview() {

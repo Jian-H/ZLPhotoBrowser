@@ -6,9 +6,16 @@ import UIKit
 final class ZLDrawTouchCollector: UIGestureRecognizer {
     typealias SamplesHandler = (_ actual: [UITouch], _ predicted: [UITouch]) -> Void
 
+    enum BeginAction: Equatable {
+        case collect
+        case cancelTracking
+        case reject
+    }
+
     var began: SamplesHandler?
     var moved: SamplesHandler?
     var ended: SamplesHandler?
+    var cancelled: (() -> Void)?
 
     /// The collector is attached to the controller root view. Let its owner
     /// decide whether the current touch belongs to the drawable image area.
@@ -27,14 +34,30 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard collectedTouch == nil,
-              let touch = touches.first(where: { shouldCollect?($0) ?? true }) else {
+        let activeTouchCount = event.allTouches?.lazy.filter {
+            $0.phase != .ended && $0.phase != .cancelled
+        }.count ?? touches.count
+        switch Self.beginAction(
+            hasCollectedTouch: collectedTouch != nil,
+            activeTouchCount: activeTouchCount
+        ) {
+        case .collect:
+            guard let touch = touches.first(where: { shouldCollect?($0) ?? true }) else {
+                super.touchesBegan(touches, with: event)
+                return
+            }
+            collectedTouch = touch
+            deliver(touch, event: event, handler: began)
             super.touchesBegan(touches, with: event)
-            return
+        case .cancelTracking:
+            cancelled?()
+            collectedTouch = nil
+            super.touchesBegan(touches, with: event)
+            state = .failed
+        case .reject:
+            super.touchesBegan(touches, with: event)
+            state = .failed
         }
-        collectedTouch = touch
-        deliver(touch, event: event, handler: began)
-        super.touchesBegan(touches, with: event)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -53,7 +76,11 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        let shouldFinish = finishCollectedTouch(in: touches, event: event, handler: ended)
+        let hadCollectedTouch = collectedTouch != nil
+        let shouldFinish = finishCollectedTouch(in: touches, event: event, handler: nil)
+        if shouldFinish, hadCollectedTouch {
+            cancelled?()
+        }
         super.touchesCancelled(touches, with: event)
         if shouldFinish {
             state = .failed
@@ -67,6 +94,16 @@ final class ZLDrawTouchCollector: UIGestureRecognizer {
 
     override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+    static func beginAction(
+        hasCollectedTouch: Bool,
+        activeTouchCount: Int
+    ) -> BeginAction {
+        if hasCollectedTouch {
+            return .cancelTracking
+        }
+        return activeTouchCount == 1 ? .collect : .reject
+    }
 
     static func shouldFinishTracking(
         hasCollectedTouch: Bool,

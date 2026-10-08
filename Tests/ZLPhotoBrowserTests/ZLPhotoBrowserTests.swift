@@ -151,6 +151,26 @@ final class ZLPhotoBrowserTests: XCTestCase {
         )
     }
 
+    func testDrawTouchCollectorCancelsTrackingWhenAnotherTouchBegins() {
+        XCTAssertEqual(
+            ZLDrawTouchCollector.beginAction(
+                hasCollectedTouch: true,
+                activeTouchCount: 2
+            ),
+            .cancelTracking
+        )
+    }
+
+    func testDrawTouchCollectorRejectsMultiTouchWhenNoTouchIsTracked() {
+        XCTAssertEqual(
+            ZLDrawTouchCollector.beginAction(
+                hasCollectedTouch: false,
+                activeTouchCount: 2
+            ),
+            .reject
+        )
+    }
+
     func testDrawLineWidthDoesNotChangeWithImageZoomScale() {
         let configuredWidth: CGFloat = 6
 
@@ -184,6 +204,20 @@ final class ZLPhotoBrowserTests: XCTestCase {
         XCTAssertGreaterThan(alpha(in: image, at: CGPoint(x: 20, y: 20)), 0)
     }
 
+    func testCanvasCanDiscardAnActivePreviewWithoutCommittingIt() {
+        let canvas = ZLDrawCanvasView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        canvas.layoutIfNeeded()
+        canvas.rebuild(paths: [], size: CGSize(width: 40, height: 40))
+
+        canvas.showPreview(makePath(start: CGPoint(x: 20, y: 20)))
+        canvas.clearPreview()
+
+        let image = UIGraphicsImageRenderer(size: canvas.bounds.size).image { context in
+            canvas.layer.render(in: context.cgContext)
+        }
+        XCTAssertEqual(alpha(in: image, at: CGPoint(x: 20, y: 20)), 0)
+    }
+
     static var allTests = [
         ("testSingleSampleRendersAsDot", testSingleSampleRendersAsDot),
         ("testSingleSampleCanBeHitByEraser", testSingleSampleCanBeHitByEraser),
@@ -198,8 +232,11 @@ final class ZLPhotoBrowserTests: XCTestCase {
         ("testSingleFingerDrawingHasPriorityOverScrollPanAfterZoom", testSingleFingerDrawingHasPriorityOverScrollPanAfterZoom),
         ("testDrawGestureIsBlockedWhilePinching", testDrawGestureIsBlockedWhilePinching),
         ("testDrawTouchCollectorOnlyFinishesWhenTheTrackedTouchEnds", testDrawTouchCollectorOnlyFinishesWhenTheTrackedTouchEnds),
+        ("testDrawTouchCollectorCancelsTrackingWhenAnotherTouchBegins", testDrawTouchCollectorCancelsTrackingWhenAnotherTouchBegins),
+        ("testDrawTouchCollectorRejectsMultiTouchWhenNoTouchIsTracked", testDrawTouchCollectorRejectsMultiTouchWhenNoTouchIsTracked),
         ("testDrawLineWidthDoesNotChangeWithImageZoomScale", testDrawLineWidthDoesNotChangeWithImageZoomScale),
         ("testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves", testCanvasPreviewShowsTheInitialDotBeforeAStrokeMoves),
+        ("testCanvasCanDiscardAnActivePreviewWithoutCommittingIt", testCanvasCanDiscardAnActivePreviewWithoutCommittingIt),
     ]
 
     private func makePath(start: CGPoint) -> ZLDrawPath {
