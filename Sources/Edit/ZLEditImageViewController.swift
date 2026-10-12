@@ -975,6 +975,7 @@ open class ZLEditImageViewController: UIViewController {
         drawTouchCollector.cancelled = { [weak self] in
             self?.cancelRawDrawSamples()
         }
+        drawTouchCollector.delegate = self
         view.addGestureRecognizer(drawTouchCollector)
         mainScrollView.panGestureRecognizer.require(toFail: panGes)
         
@@ -1718,21 +1719,21 @@ open class ZLEditImageViewController: UIViewController {
               !eraserBtn.isSelected,
               imageStickerContainerIsHidden,
               !isPinchInteractionActive else { return false }
-        if bottomShadowView.alpha > 0,
-           Self.isPointInsideAnyDrawControl(
-               touch.location(in: view),
-               in: view,
-               controls: [
-                   editToolCollectionView,
-                   eraserBtn,
-                   drawColorCollectionView,
-                   doneBtn
-               ].compactMap({ $0 })
-           ) {
-            return false
-        }
+        guard !isPointInsideEditorControl(touch.location(in: view)) else { return false }
         let point = touch.location(in: drawingImageView)
         return drawingImageView.bounds.contains(point)
+    }
+
+    private func isPointInsideEditorControl(_ point: CGPoint) -> Bool {
+        Self.isPointInsideAnyDrawControl(
+            point,
+            in: view,
+            controls: [
+                cancelBtn, undoBtn, redoBtn, doneBtn, eraserBtn,
+                editToolCollectionView, drawColorCollectionView,
+                filterCollectionView, adjustCollectionView, adjustSlider
+            ].compactMap { $0 }
+        )
     }
 
     static func isPointInsideDrawControl(_ point: CGPoint, control: UIView) -> Bool {
@@ -1745,10 +1746,18 @@ open class ZLEditImageViewController: UIViewController {
         controls: [UIView]
     ) -> Bool {
         controls.contains { control in
-            guard !control.isHidden, control.alpha > 0, control.bounds.width > 0, control.bounds.height > 0 else {
-                return false
+            guard control.bounds.width > 0, control.bounds.height > 0 else { return false }
+            // A hidden toolbar must not reserve drawable space. Disabled buttons
+            // still reserve their hit area so a tap cannot become a new stroke.
+            var ancestor: UIView? = control
+            while let current = ancestor {
+                guard !current.isHidden, current.alpha > 0.01, current.isUserInteractionEnabled else { return false }
+                if current === view {
+                    return isPointInsideDrawControl(control.convert(point, from: view), control: control)
+                }
+                ancestor = current.superview
             }
-            return control.convert(control.bounds, to: view).contains(point)
+            return false
         }
     }
 
@@ -1971,25 +1980,19 @@ open class ZLEditImageViewController: UIViewController {
 // MARK: UIGestureRecognizerDelegate
 
 extension ZLEditImageViewController: UIGestureRecognizerDelegate {
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // Reject at touch-down: waiting until recognition begins is too late
+        // for the raw drawing collector, which already creates a preview.
+        !isPointInsideEditorControl(touch.location(in: view))
+    }
+
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard imageStickerContainerIsHidden else {
+        guard imageStickerContainerIsHidden,
+              !isPointInsideEditorControl(gestureRecognizer.location(in: view)) else {
             return false
         }
         if gestureRecognizer is UITapGestureRecognizer {
-            if bottomShadowView.alpha == 1 {
-                let p = gestureRecognizer.location(in: view)
-                let convertP = bottomShadowView.convert(p, from: view)
-                for subview in bottomShadowView.subviews {
-                    if !subview.isHidden,
-                       subview.alpha != 0,
-                       subview.frame.contains(convertP) {
-                        return false
-                    }
-                }
-                return true
-            } else {
-                return true
-            }
+            return true
         } else if gestureRecognizer is UIPanGestureRecognizer {
             guard let selectedTool = selectedTool else {
                 return false
@@ -2388,6 +2391,7 @@ public class ZLPassThroughView: UIView {
     var findResponderSticker: ((CGPoint) -> UIView?)?
     
     override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard !isHidden, alpha > 0.01, isUserInteractionEnabled else { return nil }
         guard bounds.contains(point) else {
             return super.hitTest(point, with: event)
         }
@@ -2396,7 +2400,7 @@ public class ZLPassThroughView: UIView {
             let point = convert(point, to: view)
             if !view.isHidden,
                view.alpha != 0,
-               view.bounds.contains(point) {
+               view.point(inside: point, with: event) {
                 return view.hitTest(point, with: event)
             }
         }

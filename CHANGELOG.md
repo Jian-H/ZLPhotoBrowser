@@ -2,6 +2,15 @@
 
 -----
 
+## [5.0.6](https://github.com/Jian-H/ZLPhotoBrowser/releases/tag/5.0.6) (2026-10-12)
+### Fix
+* Restored undo and redo button taps by preventing editor gestures from consuming toolbar input.
+* Prevented toolbar taps from creating doodle strokes, including when the image is zoomed.
+* Preserved enlarged button hit areas and prioritized toolbar buttons over underlying stickers.
+* Kept hidden toolbars from blocking drawing input.
+
+---
+
 ## [5.0.5](https://github.com/longitachi/ZLPhotoBrowser/releases/tag/5.0.5) (2026-10-08)
 ### Fix
 * Prevented toolbar taps from creating stray doodle dots.

@@ -232,7 +232,138 @@ final class ZLPhotoBrowserTests: XCTestCase {
         XCTAssertEqual(alpha(in: image, at: CGPoint(x: 20, y: 20)), 0)
     }
 
+    func testEditorTapGestureRejectsTopButtonsIncludingExpandedHitAreas() {
+        let editor = makeEditor()
+        let tap = LocatedTapGestureRecognizer()
+        for button in [editor.cancelBtn, editor.undoBtn, editor.redoBtn] {
+            tap.testLocation = editor.view.convert(
+                CGPoint(x: -4, y: button.bounds.midY),
+                from: button
+            )
+            XCTAssertFalse(editor.gestureRecognizerShouldBegin(tap))
+        }
+    }
+
+    func testEditorDrawingPanRejectsToolbarButtons() throws {
+        let editor = makeEditor()
+        let collectionView = try XCTUnwrap(editor.bottomShadowView.subviews.compactMap { $0 as? UICollectionView }.first)
+        let drawIndex = try XCTUnwrap(ZLPhotoConfiguration.default().editImageConfiguration.tools.firstIndex(of: .draw))
+        editor.collectionView(collectionView, didSelectItemAt: IndexPath(item: drawIndex, section: 0))
+        let pan = LocatedPanGestureRecognizer()
+        for button in [editor.cancelBtn, editor.undoBtn, editor.redoBtn, editor.eraserBtn, editor.doneBtn] {
+            pan.testLocation = editor.view.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), from: button)
+            XCTAssertFalse(editor.gestureRecognizerShouldBegin(pan))
+        }
+        pan.testLocation = CGPoint(x: 160, y: 320)
+        XCTAssertTrue(editor.gestureRecognizerShouldBegin(pan))
+    }
+
+    func testDrawingCollectorAndRootGesturesRejectButtonTouchesAtTouchDown() throws {
+        let editor = makeEditor()
+        let collectionView = try XCTUnwrap(editor.bottomShadowView.subviews.compactMap { $0 as? UICollectionView }.first)
+        let drawIndex = try XCTUnwrap(ZLPhotoConfiguration.default().editImageConfiguration.tools.firstIndex(of: .draw))
+        editor.collectionView(collectionView, didSelectItemAt: IndexPath(item: drawIndex, section: 0))
+        editor.mainScrollView.zoomScale = 2
+        let gestures = try XCTUnwrap(editor.view.gestureRecognizers)
+        let collector = try XCTUnwrap(gestures.compactMap { $0 as? ZLDrawTouchCollector }.first)
+        XCTAssertTrue(collector.delegate === editor)
+        let touch = LocatedTouch(referenceView: editor.view)
+
+        for button in [editor.cancelBtn, editor.undoBtn, editor.redoBtn, editor.eraserBtn, editor.doneBtn] {
+            touch.testLocation = editor.view.convert(
+                CGPoint(x: button.bounds.midX, y: button.bounds.midY), from: button
+            )
+            for gesture in gestures {
+                XCTAssertFalse(editor.gestureRecognizer(gesture, shouldReceive: touch))
+            }
+            XCTAssertFalse(collector.shouldCollect?(touch) ?? true)
+        }
+        touch.testLocation = CGPoint(x: 160, y: 320)
+        XCTAssertTrue(collector.shouldCollect?(touch) ?? false)
+    }
+
+    func testDrawControlEligibilityIncludesExpandedHitArea() {
+        let root = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let button = ZLEnlargeButton(frame: CGRect(x: 260, y: 40, width: 30, height: 30))
+        button.enlargeInset = 8
+        root.addSubview(button)
+
+        XCTAssertTrue(ZLEditImageViewController.isPointInsideAnyDrawControl(
+            CGPoint(x: 256, y: 55), in: root, controls: [button]
+        ))
+    }
+
+    func testDrawControlEligibilityIgnoresHiddenToolbar() {
+        let root = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let toolbar = UIView(frame: root.bounds)
+        let button = ZLEnlargeButton(frame: CGRect(x: 260, y: 40, width: 30, height: 30))
+        root.addSubview(toolbar)
+        toolbar.addSubview(button)
+        toolbar.alpha = 0
+
+        XCTAssertFalse(ZLEditImageViewController.isPointInsideAnyDrawControl(
+            CGPoint(x: 275, y: 55), in: root, controls: [button]
+        ))
+    }
+
+    func testToolbarRoutesExpandedButtonHitAreaToButton() {
+        let toolbar = ZLPassThroughView(frame: CGRect(x: 0, y: 0, width: 320, height: 150))
+        let button = ZLEnlargeButton(frame: CGRect(x: 260, y: 40, width: 30, height: 30))
+        button.enlargeInset = 8
+        toolbar.addSubview(button)
+        let underlyingSticker = UIView(frame: toolbar.bounds)
+        toolbar.findResponderSticker = { _ in underlyingSticker }
+
+        XCTAssertTrue(toolbar.hitTest(CGPoint(x: 256, y: 55), with: nil) === button)
+    }
+
+    func testUndoRedoButtonsRestoreDrawingAndUpdateEnabledState() throws {
+        let path = makePath(start: CGPoint(x: 20, y: 20))
+        path.finishDrawing()
+        let editor = makeEditor(editModel: ZLEditImageModel(drawPaths: [path], actions: [.draw(path)]))
+
+        let canvas = try XCTUnwrap(editor.mainScrollView.subviews.flatMap { $0.subviews }.compactMap { $0 as? ZLDrawCanvasView }.first)
+        let initialImage = try XCTUnwrap(canvas.imageSnapshot())
+        XCTAssertGreaterThan(alpha(in: initialImage, at: CGPoint(x: 20, y: 20)), 0)
+        XCTAssertTrue(editor.undoBtn.isEnabled)
+        XCTAssertFalse(editor.redoBtn.isEnabled)
+        let undoAction = try XCTUnwrap(editor.undoBtn.actions(forTarget: editor, forControlEvent: .touchUpInside)?.first)
+        editor.perform(NSSelectorFromString(undoAction))
+        XCTAssertFalse(editor.undoBtn.isEnabled)
+        XCTAssertTrue(editor.redoBtn.isEnabled)
+        let undoneImage = try XCTUnwrap(canvas.imageSnapshot())
+        XCTAssertEqual(alpha(in: undoneImage, at: CGPoint(x: 20, y: 20)), 0)
+        let redoAction = try XCTUnwrap(editor.redoBtn.actions(forTarget: editor, forControlEvent: .touchUpInside)?.first)
+        editor.perform(NSSelectorFromString(redoAction))
+        XCTAssertTrue(editor.undoBtn.isEnabled)
+        XCTAssertFalse(editor.redoBtn.isEnabled)
+        let redoneImage = try XCTUnwrap(canvas.imageSnapshot())
+        XCTAssertGreaterThan(alpha(in: redoneImage, at: CGPoint(x: 20, y: 20)), 0)
+    }
+
+    private func makeEditor(editModel: ZLEditImageModel? = nil) -> ZLEditImageViewController {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 640), format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 320, height: 640))
+        }
+        let editor = ZLEditImageViewController(image: image, editModel: editModel)
+        editor.loadViewIfNeeded()
+        editor.view.frame = CGRect(x: 0, y: 0, width: 320, height: 640)
+        editor.view.setNeedsLayout()
+        editor.view.layoutIfNeeded()
+        return editor
+    }
+
     static var allTests = [
+        ("testDrawingCollectorAndRootGesturesRejectButtonTouchesAtTouchDown", testDrawingCollectorAndRootGesturesRejectButtonTouchesAtTouchDown),
+        ("testEditorTapGestureRejectsTopButtonsIncludingExpandedHitAreas", testEditorTapGestureRejectsTopButtonsIncludingExpandedHitAreas),
+        ("testEditorDrawingPanRejectsToolbarButtons", testEditorDrawingPanRejectsToolbarButtons),
+        ("testDrawControlEligibilityIncludesExpandedHitArea", testDrawControlEligibilityIncludesExpandedHitArea),
+        ("testDrawControlEligibilityIgnoresHiddenToolbar", testDrawControlEligibilityIgnoresHiddenToolbar),
+        ("testToolbarRoutesExpandedButtonHitAreaToButton", testToolbarRoutesExpandedButtonHitAreaToButton),
+        ("testUndoRedoButtonsRestoreDrawingAndUpdateEnabledState", testUndoRedoButtonsRestoreDrawingAndUpdateEnabledState),
         ("testSingleSampleRendersAsDot", testSingleSampleRendersAsDot),
         ("testSingleSampleCanBeHitByEraser", testSingleSampleCanBeHitByEraser),
         ("testDenseSamplesAreRetainedAndReachTrueEndpoint", testDenseSamplesAreRetainedAndReachTrueEndpoint),
@@ -297,5 +428,36 @@ final class ZLPhotoBrowserTests: XCTestCase {
         )
         context?.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         return bytes[3]
+    }
+}
+
+private final class LocatedTapGestureRecognizer: UITapGestureRecognizer {
+    var testLocation: CGPoint = .zero
+
+    override func location(in view: UIView?) -> CGPoint {
+        testLocation
+    }
+}
+
+private final class LocatedPanGestureRecognizer: UIPanGestureRecognizer {
+    var testLocation: CGPoint = .zero
+
+    override func location(in view: UIView?) -> CGPoint {
+        testLocation
+    }
+}
+
+private final class LocatedTouch: UITouch {
+    private weak var referenceView: UIView?
+    var testLocation: CGPoint = .zero
+
+    init(referenceView: UIView) {
+        self.referenceView = referenceView
+        super.init()
+    }
+
+    override func location(in view: UIView?) -> CGPoint {
+        guard let view else { return testLocation }
+        return view.convert(testLocation, from: referenceView)
     }
 }
