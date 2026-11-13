@@ -2,11 +2,16 @@
 
 -----
 
-## [5.0.7](https://github.com/Jian-H/ZLPhotoBrowser/releases/tag/5.0.7) (2026-11-13)
+## [5.0.8](https://github.com/Jian-H/ZLPhotoBrowser/releases/tag/5.0.8) (2026-11-13)
 ### Fix
 * Fixed cumulative doodle stroke drift and splitting at tile boundaries while drawing additional strokes.
 * Aligned tile rendering and layout to physical pixels to preserve previously drawn strokes.
 * Fixed missing edge strokes when the canvas size changes without changing the tile count.
+
+---
+
+## [5.0.7](https://github.com/Jian-H/ZLPhotoBrowser/releases/tag/5.0.7) (2026-11-13)
+* This release points to the 5.0.6 code. The doodle fixes are included in 5.0.8.
 
 ---
 
