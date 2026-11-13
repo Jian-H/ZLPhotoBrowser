@@ -64,6 +64,54 @@ final class ZLPhotoBrowserTests: XCTestCase {
         XCTAssertTrue(session.predictedPoints.isEmpty)
     }
 
+    func testCommittingStrokesDoesNotResampleExistingInkOrSplitTileSeams() throws {
+        let size = CGSize(width: 600, height: 800)
+        let canvas = ZLDrawCanvasView(frame: CGRect(origin: .zero, size: size))
+        canvas.rebuild(paths: [], size: size)
+        // Fractional brush widths are normal after converting from view to image
+        // coordinates. The horizontal stroke crosses the x = 256 tile seam.
+        func stroke(_ start: CGPoint, _ end: CGPoint) -> ZLDrawPath {
+            let path = ZLDrawPath(pathColor: .red, pathWidth: 6.123,
+                                  defaultLinePath: 2.345, ratio: 1, startPoint: start)
+            path.addLine(to: end)
+            path.finishDrawing()
+            return path
+        }
+        var paths = [stroke(CGPoint(x: 100, y: 100), CGPoint(x: 110, y: 110))]
+        canvas.commit(paths[0], allPaths: paths)
+        paths.append(stroke(CGPoint(x: 230, y: 128), CGPoint(x: 280, y: 128)))
+        canvas.commit(paths[1], allPaths: paths)
+        let region = CGRect(x: 80, y: 80, width: 220, height: 80)
+        let before = try pixels(in: XCTUnwrap(canvas.imageSnapshot()), rect: region)
+
+        for _ in 0..<100 {
+            let path = stroke(CGPoint(x: 200, y: 200), CGPoint(x: 205, y: 205))
+            paths.append(path)
+            canvas.commit(path, allPaths: paths)
+        }
+        let after = try pixels(in: XCTUnwrap(canvas.imageSnapshot()), rect: region)
+        XCTAssertEqual(before, after, "New strokes must not move or blur previously committed ink")
+
+        canvas.rebuild(paths: paths, size: size)
+        let rebuilt = try pixels(in: XCTUnwrap(canvas.imageSnapshot()), rect: region)
+        XCTAssertEqual(before, rebuilt, "Incremental and vector-based rendering must agree at tile seams")
+    }
+
+    func testRebuildUpdatesEdgeTilesWhenSizeChangesWithinTheSameGrid() throws {
+        let canvas = ZLDrawCanvasView(frame: CGRect(x: 0, y: 0, width: 300, height: 400))
+        canvas.rebuild(paths: [], size: CGSize(width: 600, height: 800))
+        let path = makePath(start: CGPoint(x: 625, y: 825))
+        path.addLine(to: CGPoint(x: 640, y: 840))
+        path.finishDrawing()
+        // Both sizes use a 3 x 4 tile grid, but the last row/column must grow.
+        canvas.rebuild(paths: [path], size: CGSize(width: 650, height: 850))
+        let image = try XCTUnwrap(canvas.imageSnapshot())
+        XCTAssertGreaterThan(alpha(in: image, at: CGPoint(x: 635, y: 835)), 0)
+        let containers = canvas.subviews
+        XCTAssertEqual(try XCTUnwrap(containers.map { $0.frame.maxX }.max()), 300, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(containers.map { $0.frame.maxY }.max()), 850 * 300 / 650, accuracy: 0.001)
+    }
+
     func testDrawStrokeSessionReplaysAShortStrokeIntoItsPath() {
         let start = CGPoint(x: 10, y: 10)
         let end = CGPoint(x: 14, y: 13)
@@ -357,6 +405,8 @@ final class ZLPhotoBrowserTests: XCTestCase {
     }
 
     static var allTests = [
+        ("testCommittingStrokesDoesNotResampleExistingInkOrSplitTileSeams", testCommittingStrokesDoesNotResampleExistingInkOrSplitTileSeams),
+        ("testRebuildUpdatesEdgeTilesWhenSizeChangesWithinTheSameGrid", testRebuildUpdatesEdgeTilesWhenSizeChangesWithinTheSameGrid),
         ("testDrawingCollectorAndRootGesturesRejectButtonTouchesAtTouchDown", testDrawingCollectorAndRootGesturesRejectButtonTouchesAtTouchDown),
         ("testEditorTapGestureRejectsTopButtonsIncludingExpandedHitAreas", testEditorTapGestureRejectsTopButtonsIncludingExpandedHitAreas),
         ("testEditorDrawingPanRejectsToolbarButtons", testEditorDrawingPanRejectsToolbarButtons),
@@ -393,6 +443,20 @@ final class ZLPhotoBrowserTests: XCTestCase {
             ratio: 1,
             startPoint: start
         )
+    }
+
+    private func pixels(in image: UIImage, rect: CGRect) throws -> Data {
+        let pixelRect = rect.applying(CGAffineTransform(scaleX: image.scale, y: image.scale))
+        let crop = try XCTUnwrap(image.cgImage?.cropping(to: pixelRect))
+        var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: crop.width, height: crop.height,
+            bitsPerComponent: 8, bytesPerRow: crop.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+        return Data(bytes)
     }
 
     private func render(path: ZLDrawPath, size: CGSize) -> UIImage {

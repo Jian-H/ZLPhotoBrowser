@@ -17,15 +17,27 @@ final class ZLDrawCanvasView: UIView {
         let rect: CGRect
         let container = UIView()
         let imageView = UIImageView()
+        let rasterScale: CGFloat
         var padding: CGFloat = 0
 
         var renderRect: CGRect {
-            rect.insetBy(dx: -padding, dy: -padding)
+            // UIImage's backing store has an integer pixel size. Using the
+            // unrounded padded size to draw the previous image rescales old ink
+            // slightly on every commit, accumulating drift at tile boundaries.
+            let padded = rect.insetBy(dx: -padding, dy: -padding)
+            let minX = floor(padded.minX * rasterScale)
+            let minY = floor(padded.minY * rasterScale)
+            let maxX = ceil(padded.maxX * rasterScale)
+            let maxY = ceil(padded.maxY * rasterScale)
+            return CGRect(x: minX / rasterScale, y: minY / rasterScale,
+                          width: (maxX - minX) / rasterScale,
+                          height: (maxY - minY) / rasterScale)
         }
 
-        init(rect: CGRect, padding: CGFloat) {
+        init(rect: CGRect, padding: CGFloat, rasterScale: CGFloat) {
             self.rect = rect
             self.padding = padding
+            self.rasterScale = rasterScale
             container.clipsToBounds = true
             imageView.contentMode = .scaleToFill
             container.addSubview(imageView)
@@ -35,6 +47,13 @@ final class ZLDrawCanvasView: UIView {
     private let previewLayer = CAShapeLayer()
     private let predictedPreviewLayer = CAShapeLayer()
     private var renderSize: CGSize = .zero
+    private var tileGridSize: CGSize = .zero
+    private let rasterScale: CGFloat = {
+        if #available(iOS 11.0, *) {
+            return UIGraphicsImageRendererFormat.preferred().scale
+        }
+        return UIGraphicsImageRendererFormat.default().scale
+    }()
     private var tiles: [Tile] = []
     private var tilePadding: CGFloat = 2
     private var pendingInvalidatedPaths: [ZLDrawPath] = []
@@ -166,20 +185,22 @@ final class ZLDrawCanvasView: UIView {
         guard renderSize.width > 0, renderSize.height > 0 else { return }
         let columns = Int(ceil(renderSize.width / Self.tileLength))
         let rows = Int(ceil(renderSize.height / Self.tileLength))
-        guard tiles.count != columns * rows else {
+        guard tileGridSize != renderSize || tiles.count != columns * rows else {
             tiles.forEach { $0.padding = tilePadding }
             layoutTiles()
             return
         }
         tiles.forEach { $0.container.removeFromSuperview() }
         tiles.removeAll(keepingCapacity: true)
+        tileGridSize = renderSize
         for row in 0..<rows {
             for column in 0..<columns {
                 let x = CGFloat(column) * Self.tileLength
                 let y = CGFloat(row) * Self.tileLength
                 let tile = Tile(
                     rect: CGRect(x: x, y: y, width: min(Self.tileLength, renderSize.width - x), height: min(Self.tileLength, renderSize.height - y)),
-                    padding: tilePadding
+                    padding: tilePadding,
+                    rasterScale: rasterScale
                 )
                 insertSubview(tile.container, at: 0)
                 tiles.append(tile)
@@ -198,8 +219,8 @@ final class ZLDrawCanvasView: UIView {
                 height: tile.rect.height * scale
             )
             tile.imageView.frame = CGRect(
-                x: -tile.padding * scale,
-                y: -tile.padding * scale,
+                x: (tile.renderRect.minX - tile.rect.minX) * scale,
+                y: (tile.renderRect.minY - tile.rect.minY) * scale,
                 width: tile.renderRect.width * scale,
                 height: tile.renderRect.height * scale
             )
@@ -258,7 +279,7 @@ final class ZLDrawCanvasView: UIView {
     }
 
     private func image(for rect: CGRect, actions: (CGContext) -> Void) -> UIImage {
-        UIGraphicsImageRenderer.zl.renderImage(size: rect.size) { context in
+        UIGraphicsImageRenderer.zl.renderImage(size: rect.size, formatConfig: { $0.scale = self.rasterScale }) { context in
             context.setAllowsAntialiasing(true)
             context.setShouldAntialias(true)
             actions(context)
